@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   Camera,
   ChevronRight,
   CircleDot,
@@ -38,7 +39,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
 
 type MarkerType = "point" | "member";
-type ShapeType = "line" | "rect" | "ellipse";
+type ShapeType = "line" | "arrow" | "rect" | "ellipse";
 type ToolType = MarkerType | ShapeType | "move";
 
 type Marker = {
@@ -75,14 +76,28 @@ type SavedBoard = {
 
 const STORAGE_KEY = "team-map-recorder-v1";
 const COLORS = ["#4ade80", "#38bdf8", "#fbbf24", "#fb7185", "#c084fc", "#f8fafc"];
+const SHAPE_LABELS: Record<ShapeType, string> = {
+  line: "直線",
+  arrow: "箭頭",
+  rect: "矩形",
+  ellipse: "圓形",
+};
 const TOOL_SHORTCUTS: Record<string, { tool: ToolType; label: string }> = {
   p: { tool: "point", label: "一般標點" },
   m: { tool: "member", label: "隊員位置" },
   v: { tool: "move", label: "移動畫布" },
   l: { tool: "line", label: "直線" },
+  a: { tool: "arrow", label: "箭頭" },
   r: { tool: "rect", label: "矩形" },
   o: { tool: "ellipse", label: "圓形" },
 };
+
+function ShapeTypeIcon({ type, className }: { type: ShapeType; className: string }) {
+  if (type === "line") return <Slash className={className} />;
+  if (type === "arrow") return <ArrowRight className={className} />;
+  if (type === "rect") return <Square className={className} />;
+  return <Circle className={className} />;
+}
 
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -246,7 +261,7 @@ export default function Home() {
     if (!isBoard || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
-    if (tool === "line" || tool === "rect" || tool === "ellipse") {
+    if (tool === "line" || tool === "arrow" || tool === "rect" || tool === "ellipse") {
       const point = pointOnMap(event.clientX, event.clientY);
       if (!point?.inside) return;
       const draft: Shape = { id: makeId(), type: tool, x1: point.x, y1: point.y, x2: point.x, y2: point.y, color: COLORS[0], strokeWidth: 4 };
@@ -432,12 +447,15 @@ export default function Home() {
       context.save();
       context.strokeStyle = shape.color;
       context.lineWidth = shape.strokeWidth * Math.max(1, canvas.width / 1200);
-      const shapeMargin = context.lineWidth / 2;
+      const arrowHeadLength = shape.type === "arrow"
+        ? Math.max(context.lineWidth * 3.5, 16 * Math.max(1, canvas.width / 1200))
+        : 0;
+      const shapeMargin = Math.max(context.lineWidth / 2, arrowHeadLength);
       includeBounds(Math.min(x1, x2) - shapeMargin, Math.min(y1, y2) - shapeMargin, Math.max(x1, x2) + shapeMargin, Math.max(y1, y2) + shapeMargin);
       context.lineCap = "round";
       context.lineJoin = "round";
       context.beginPath();
-      if (shape.type === "line") {
+      if (shape.type === "line" || shape.type === "arrow") {
         context.moveTo(x1, y1); context.lineTo(x2, y2);
       } else if (shape.type === "rect") {
         context.rect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
@@ -445,6 +463,17 @@ export default function Home() {
         context.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
       }
       context.stroke();
+      if (shape.type === "arrow") {
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const wingAngle = Math.PI / 7;
+        context.fillStyle = shape.color;
+        context.beginPath();
+        context.moveTo(x2, y2);
+        context.lineTo(x2 - arrowHeadLength * Math.cos(angle - wingAngle), y2 - arrowHeadLength * Math.sin(angle - wingAngle));
+        context.lineTo(x2 - arrowHeadLength * Math.cos(angle + wingAngle), y2 - arrowHeadLength * Math.sin(angle + wingAngle));
+        context.closePath();
+        context.fill();
+      }
       context.restore();
     }
     const radius = Math.max(12, Math.min(canvas.width, canvas.height) * 0.018);
@@ -630,9 +659,10 @@ export default function Home() {
           </div>
 
           <p className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">繪圖工具</p>
-          <div className="grid grid-cols-4 gap-2 lg:grid-cols-2">
+          <div className="grid grid-cols-5 gap-2 lg:grid-cols-2">
             <button onClick={() => setTool("move")} className={`drawing-tool ${tool === "move" ? "active" : ""}`} title="移動畫布（V）" aria-keyshortcuts="V"><Move /><span>移動</span></button>
             <button onClick={() => setTool("line")} className={`drawing-tool ${tool === "line" ? "active" : ""}`} title="繪製直線（L）" aria-keyshortcuts="L"><Slash /><span>直線</span></button>
+            <button onClick={() => setTool("arrow")} className={`drawing-tool ${tool === "arrow" ? "active" : ""}`} title="繪製箭頭（A）" aria-keyshortcuts="A"><ArrowRight /><span>箭頭</span></button>
             <button onClick={() => setTool("rect")} className={`drawing-tool ${tool === "rect" ? "active" : ""}`} title="繪製矩形（R）" aria-keyshortcuts="R"><Square /><span>矩形</span></button>
             <button onClick={() => setTool("ellipse")} className={`drawing-tool ${tool === "ellipse" ? "active" : ""}`} title="繪製圓形（O）" aria-keyshortcuts="O"><Circle /><span>圓形</span></button>
           </div>
@@ -713,6 +743,14 @@ export default function Home() {
                       onPointerDown: (event: React.PointerEvent<SVGElement>) => onShapePointerDown(event, shape),
                     };
                     if (shape.type === "line") return <line key={shape.id} x1={shape.x1 * 100} y1={shape.y1 * 100} x2={shape.x2 * 100} y2={shape.y2 * 100} {...common} />;
+                    if (shape.type === "arrow") return <g key={shape.id}>
+                      <defs>
+                        <marker id={`arrow-${shape.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse" markerUnits="strokeWidth">
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill={shape.color} />
+                        </marker>
+                      </defs>
+                      <line x1={shape.x1 * 100} y1={shape.y1 * 100} x2={shape.x2 * 100} y2={shape.y2 * 100} markerEnd={`url(#arrow-${shape.id})`} {...common} />
+                    </g>;
                     if (shape.type === "rect") return <rect key={shape.id} x={Math.min(shape.x1, shape.x2) * 100} y={Math.min(shape.y1, shape.y2) * 100} width={Math.abs(shape.x2 - shape.x1) * 100} height={Math.abs(shape.y2 - shape.y1) * 100} {...common} />;
                     return <ellipse key={shape.id} cx={(shape.x1 + shape.x2) * 50} cy={(shape.y1 + shape.y2) * 50} rx={Math.abs(shape.x2 - shape.x1) * 50} ry={Math.abs(shape.y2 - shape.y1) * 50} {...common} />;
                   })}
@@ -755,8 +793,8 @@ export default function Home() {
           {selectedShape ? (
             <div className="p-4">
               <div className="mb-5 flex items-center gap-3">
-                <span className="grid size-10 place-items-center rounded-xl border" style={{ color: selectedShape.color, borderColor: `${selectedShape.color}66`, background: `${selectedShape.color}18` }}>{selectedShape.type === "line" ? <Slash className="size-5" /> : selectedShape.type === "rect" ? <Square className="size-5" /> : <Circle className="size-5" />}</span>
-                <div><p className="text-sm font-semibold">編輯{selectedShape.type === "line" ? "直線" : selectedShape.type === "rect" ? "矩形" : "圓形"}</p><p className="text-[10px] text-muted-foreground">可在地圖上直接拖曳移動</p></div>
+                <span className="grid size-10 place-items-center rounded-xl border" style={{ color: selectedShape.color, borderColor: `${selectedShape.color}66`, background: `${selectedShape.color}18` }}><ShapeTypeIcon type={selectedShape.type} className="size-5" /></span>
+                <div><p className="text-sm font-semibold">編輯{SHAPE_LABELS[selectedShape.type]}</p><p className="text-[10px] text-muted-foreground">可在地圖上直接拖曳移動</p></div>
               </div>
               <label className="field-label">顏色</label>
               <div className="flex flex-wrap gap-2">
@@ -789,8 +827,8 @@ export default function Home() {
             <div className="max-h-[440px] overflow-y-auto p-2 lg:max-h-[calc(100vh-8.5rem)]">
               {shapes.map((shape) => (
                 <button key={shape.id} onClick={() => { setSelectedShapeId(shape.id); setSelectedId(null); }} className="marker-list-item">
-                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted" style={{ color: shape.color }}>{shape.type === "line" ? <Slash className="size-4" /> : shape.type === "rect" ? <Square className="size-4" /> : <Circle className="size-4" />}</span>
-                  <span className="min-w-0 flex-1 text-left"><b>{shape.type === "line" ? "直線" : shape.type === "rect" ? "矩形" : "圓形"}</b><small>{shape.strokeWidth}px 線條</small></span>
+                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted" style={{ color: shape.color }}><ShapeTypeIcon type={shape.type} className="size-4" /></span>
+                  <span className="min-w-0 flex-1 text-left"><b>{SHAPE_LABELS[shape.type]}</b><small>{shape.strokeWidth}px 線條</small></span>
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </button>
               ))}

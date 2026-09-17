@@ -37,7 +37,7 @@
 .marker-dot svg { @apply size-3.5; }
 .map-marker.point .marker-dot { border-radius: 50% 50% 50% 12%; transform: rotate(-45deg); }
 .map-marker.point .marker-dot svg { transform: rotate(45deg); }
-.marker-label { @apply pointer-events-none absolute left-1/2 top-1/2 z-10 max-w-60 -translate-x-1/2 -translate-y-1/2 truncate whitespace-nowrap rounded-md border border-white/15 bg-[#07110d]/80 px-1.5 py-0.5 text-[10px] leading-tight font-semibold text-white shadow-lg backdrop-blur; text-shadow: 0 1px 2px #000; }
+.marker-label { @apply pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-10 max-w-60 -translate-x-1/2 truncate whitespace-nowrap rounded-md border border-white/15 bg-[#07110d]/80 px-1.5 py-0.5 text-[10px] leading-tight font-semibold text-white shadow-lg backdrop-blur; text-shadow: 0 1px 2px #000; }
 .map-marker.selected .marker-dot { box-shadow: 0 0 0 3px white, 0 0 22px var(--marker-color); }
 
 .field-label { @apply mb-2 block text-[11px] font-medium tracking-wide text-muted-foreground; }

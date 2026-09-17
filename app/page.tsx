@@ -467,19 +467,22 @@ export default function Home() {
       const label = marker.name || (marker.type === "member" ? "隊員" : "標點");
       const labelWidth = context.measureText(label).width + fontSize;
       const labelX = Math.min(canvas.width - labelWidth - 4, Math.max(4, x - labelWidth / 2));
-      const labelY = Math.max(fontSize + 4, iconCenterY + fontSize * 0.34);
       const markerLeft = x - radius;
       const markerTop = marker.type === "member" ? y - radius : y - radius * 2.2;
       const markerRight = x + radius;
       const markerBottom = marker.type === "member" ? y + radius : y;
+      const labelHeight = fontSize * 1.35;
+      const labelGap = Math.max(6, fontSize * 0.35);
+      const labelTop = Math.max(4, markerTop - labelGap - labelHeight);
+      const labelY = labelTop + fontSize;
       includeBounds(
         Math.min(markerLeft, labelX),
-        Math.min(markerTop, labelY - fontSize),
+        Math.min(markerTop, labelTop),
         Math.max(markerRight, labelX + labelWidth),
-        Math.max(markerBottom, labelY + fontSize * 0.35),
+        Math.max(markerBottom, labelTop + labelHeight),
       );
       context.fillStyle = "rgba(7,17,13,.88)";
-      context.fillRect(labelX, labelY - fontSize, labelWidth, fontSize * 1.35);
+      context.fillRect(labelX, labelTop, labelWidth, labelHeight);
       context.fillStyle = "#f1f5f9";
       context.fillText(label, labelX + fontSize * 0.5, labelY);
       context.restore();

@@ -66,6 +66,7 @@ type Shape = {
   y2: number;
   color: string;
   strokeWidth: number;
+  rotation?: number;
 };
 
 type TextBox = {
@@ -79,6 +80,8 @@ type TextBox = {
   color: string;
   outlineColor: string;
   outlineWidth: number;
+  rotation?: number;
+  scale?: number;
 };
 
 type SavedBoard = {
@@ -137,6 +140,10 @@ function makeId() {
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function normalizeRotation(value: number) {
+  return ((value + 180) % 360 + 360) % 360 - 180;
+}
+
 function saveFile(content: BlobPart, type: string, filename: string) {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const anchor = document.createElement("a");
@@ -176,13 +183,18 @@ export default function Home() {
   const historyPastRef = useRef<SceneSnapshot[]>([]);
   const historyFutureRef = useRef<SceneSnapshot[]>([]);
   const gestureRef = useRef<{
-    mode: "idle" | "pan" | "draw" | "selection";
+    mode: "idle" | "pan" | "draw" | "selection" | "resize-shape" | "rotate-shape" | "resize-text" | "rotate-text";
     markerIds?: string[];
     shapeIds?: string[];
     originalMarkers?: Marker[];
     originalShapes?: Shape[];
     textIds?: string[];
     originalTexts?: TextBox[];
+    targetId?: string;
+    originalShape?: Shape;
+    originalText?: TextBox;
+    startPointerAngle?: number;
+    startDistance?: number;
     historySnapshot?: SceneSnapshot;
     startClientX?: number;
     startClientY?: number;
@@ -420,6 +432,8 @@ export default function Home() {
         color: "#ffffff",
         outlineColor: "#07110d",
         outlineWidth: 2,
+        rotation: 0,
+        scale: 1,
       };
       recordHistory();
       setTexts((current) => [...current, textBox]);
@@ -456,7 +470,7 @@ export default function Home() {
     if (tool === "line" || tool === "arrow" || tool === "rect" || tool === "ellipse") {
       const point = pointOnMap(event.clientX, event.clientY);
       if (!point?.inside) return;
-      const draft: Shape = { id: makeId(), type: tool, x1: point.x, y1: point.y, x2: point.x, y2: point.y, color: COLORS[0], strokeWidth: 4 };
+      const draft: Shape = { id: makeId(), type: tool, x1: point.x, y1: point.y, x2: point.x, y2: point.y, color: COLORS[0], strokeWidth: 4, rotation: 0 };
       setDraftShape(draft);
       gestureRef.current = { mode: "draw" };
     } else {
@@ -475,6 +489,78 @@ export default function Home() {
     if (gestureRef.current.mode === "draw") {
       const point = pointOnMap(event.clientX, event.clientY);
       if (point) setDraftShape((current) => current ? { ...current, x2: point.x, y2: point.y } : null);
+    } else if (gestureRef.current.mode === "resize-shape") {
+      const rect = mapRef.current?.getBoundingClientRect();
+      const original = gestureRef.current.originalShape;
+      const targetId = gestureRef.current.targetId;
+      const point = pointOnMap(event.clientX, event.clientY);
+      if (!rect || !original || !targetId || !point) return;
+      const centerX = (original.x1 + original.x2) / 2;
+      const centerY = (original.y1 + original.y2) / 2;
+      const radians = ((original.rotation ?? 0) * Math.PI) / 180;
+      const deltaXPixels = (point.x - centerX) * rect.width;
+      const deltaYPixels = (point.y - centerY) * rect.height;
+      let localX = (deltaXPixels * Math.cos(radians) + deltaYPixels * Math.sin(radians)) / rect.width;
+      let localY = (-deltaXPixels * Math.sin(radians) + deltaYPixels * Math.cos(radians)) / rect.height;
+      const minimumX = 12 / rect.width;
+      const minimumY = 12 / rect.height;
+      if (original.type === "line" || original.type === "arrow") {
+        const pixelLength = Math.hypot(localX * rect.width, localY * rect.height);
+        if (pixelLength < 12) {
+          const ratio = 12 / Math.max(pixelLength, 0.001);
+          localX *= ratio;
+          localY *= ratio;
+        }
+        setShapes((current) => current.map((shape) => shape.id === targetId ? {
+          ...shape,
+          x1: centerX - localX,
+          y1: centerY - localY,
+          x2: centerX + localX,
+          y2: centerY + localY,
+        } : shape));
+      } else {
+        const halfWidth = Math.max(minimumX, Math.abs(localX));
+        const halfHeight = Math.max(minimumY, Math.abs(localY));
+        setShapes((current) => current.map((shape) => shape.id === targetId ? {
+          ...shape,
+          x1: centerX - halfWidth,
+          y1: centerY - halfHeight,
+          x2: centerX + halfWidth,
+          y2: centerY + halfHeight,
+        } : shape));
+      }
+    } else if (gestureRef.current.mode === "rotate-shape" || gestureRef.current.mode === "rotate-text") {
+      const rect = mapRef.current?.getBoundingClientRect();
+      const original = gestureRef.current.mode === "rotate-shape"
+        ? gestureRef.current.originalShape
+        : gestureRef.current.originalText;
+      const targetId = gestureRef.current.targetId;
+      if (!rect || !original || !targetId) return;
+      const centerX = "x" in original ? original.x : (original.x1 + original.x2) / 2;
+      const centerY = "y" in original ? original.y : (original.y1 + original.y2) / 2;
+      const pointerAngle = Math.atan2(
+        event.clientY - (rect.top + centerY * rect.height),
+        event.clientX - (rect.left + centerX * rect.width),
+      ) * 180 / Math.PI;
+      const originalRotation = original.rotation ?? 0;
+      let rotation = normalizeRotation(originalRotation + pointerAngle - (gestureRef.current.startPointerAngle ?? pointerAngle));
+      if (event.shiftKey) rotation = Math.round(rotation / 15) * 15;
+      if (gestureRef.current.mode === "rotate-shape") {
+        setShapes((current) => current.map((shape) => shape.id === targetId ? { ...shape, rotation } : shape));
+      } else {
+        setTexts((current) => current.map((textBox) => textBox.id === targetId ? { ...textBox, rotation } : textBox));
+      }
+    } else if (gestureRef.current.mode === "resize-text") {
+      const rect = mapRef.current?.getBoundingClientRect();
+      const original = gestureRef.current.originalText;
+      const targetId = gestureRef.current.targetId;
+      if (!rect || !original || !targetId) return;
+      const centerClientX = rect.left + original.x * rect.width;
+      const centerClientY = rect.top + original.y * rect.height;
+      const distance = Math.hypot(event.clientX - centerClientX, event.clientY - centerClientY);
+      const ratio = distance / Math.max(gestureRef.current.startDistance ?? distance, 1);
+      const scale = Math.min(5, Math.max(0.25, (original.scale ?? 1) * ratio));
+      setTexts((current) => current.map((textBox) => textBox.id === targetId ? { ...textBox, scale } : textBox));
     } else if (gestureRef.current.mode === "selection") {
       const rect = mapRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -550,6 +636,9 @@ export default function Home() {
     } else if (gestureRef.current.mode === "selection" && pointerRef.current.moved > 5) {
       if (gestureRef.current.historySnapshot) recordHistory(gestureRef.current.historySnapshot);
       setStatus(selectionCount > 1 ? `已移動 ${selectionCount} 個物件` : "已更新物件位置");
+    } else if (["resize-shape", "rotate-shape", "resize-text", "rotate-text"].includes(gestureRef.current.mode) && pointerRef.current.moved > 2) {
+      if (gestureRef.current.historySnapshot) recordHistory(gestureRef.current.historySnapshot);
+      setStatus(gestureRef.current.mode.startsWith("rotate") ? "已旋轉物件" : "已調整物件大小");
     }
     gestureRef.current = { mode: "idle" };
   };
@@ -643,6 +732,45 @@ export default function Home() {
       historySnapshot: snapshotScene(),
       startClientX: event.clientX,
       startClientY: event.clientY,
+    };
+    setDragging(true);
+  };
+
+  const onShapeTransformHandleDown = (event: PointerEvent<SVGElement>, shape: Shape, action: "resize" | "rotate") => {
+    event.stopPropagation();
+    event.preventDefault();
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const centerX = rect.left + ((shape.x1 + shape.x2) / 2) * rect.width;
+    const centerY = rect.top + ((shape.y1 + shape.y2) / 2) * rect.height;
+    pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
+    gestureRef.current = {
+      mode: action === "resize" ? "resize-shape" : "rotate-shape",
+      targetId: shape.id,
+      originalShape: { ...shape },
+      startPointerAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI,
+      historySnapshot: snapshotScene(),
+    };
+    setDragging(true);
+  };
+
+  const onTextTransformHandleDown = (event: PointerEvent<HTMLButtonElement>, textBox: TextBox, action: "resize" | "rotate") => {
+    event.stopPropagation();
+    event.preventDefault();
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const centerX = rect.left + textBox.x * rect.width;
+    const centerY = rect.top + textBox.y * rect.height;
+    pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
+    gestureRef.current = {
+      mode: action === "resize" ? "resize-text" : "rotate-text",
+      targetId: textBox.id,
+      originalText: { ...textBox },
+      startPointerAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI,
+      startDistance: Math.hypot(event.clientX - centerX, event.clientY - centerY),
+      historySnapshot: snapshotScene(),
     };
     setDragging(true);
   };
@@ -762,11 +890,32 @@ export default function Home() {
       maxY = Math.max(maxY, bottom);
       hasObjects = true;
     };
+    const includeRotatedBounds = (centerX: number, centerY: number, halfWidth: number, halfHeight: number, rotation: number, margin = 0) => {
+      const radians = rotation * Math.PI / 180;
+      const corners = [
+        [-halfWidth, -halfHeight],
+        [halfWidth, -halfHeight],
+        [halfWidth, halfHeight],
+        [-halfWidth, halfHeight],
+      ].map(([x, y]) => ({
+        x: centerX + x * Math.cos(radians) - y * Math.sin(radians),
+        y: centerY + x * Math.sin(radians) + y * Math.cos(radians),
+      }));
+      includeBounds(
+        Math.min(...corners.map((corner) => corner.x)) - margin,
+        Math.min(...corners.map((corner) => corner.y)) - margin,
+        Math.max(...corners.map((corner) => corner.x)) + margin,
+        Math.max(...corners.map((corner) => corner.y)) + margin,
+      );
+    };
     for (const shape of shapes) {
       const x1 = shape.x1 * canvas.width;
       const y1 = shape.y1 * canvas.height;
       const x2 = shape.x2 * canvas.width;
       const y2 = shape.y2 * canvas.height;
+      const centerX = (x1 + x2) / 2;
+      const centerY = (y1 + y2) / 2;
+      const rotation = shape.rotation ?? 0;
       context.save();
       context.strokeStyle = shape.color;
       context.lineWidth = shape.strokeWidth * Math.max(1, canvas.width / 1200);
@@ -774,26 +923,32 @@ export default function Home() {
         ? Math.max(context.lineWidth * 3.5, 16 * Math.max(1, canvas.width / 1200))
         : 0;
       const shapeMargin = Math.max(context.lineWidth / 2, arrowHeadLength);
-      includeBounds(Math.min(x1, x2) - shapeMargin, Math.min(y1, y2) - shapeMargin, Math.max(x1, x2) + shapeMargin, Math.max(y1, y2) + shapeMargin);
+      includeRotatedBounds(centerX, centerY, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, rotation, shapeMargin);
+      context.translate(centerX, centerY);
+      context.rotate(rotation * Math.PI / 180);
+      const localX1 = x1 - centerX;
+      const localY1 = y1 - centerY;
+      const localX2 = x2 - centerX;
+      const localY2 = y2 - centerY;
       context.lineCap = "round";
       context.lineJoin = "round";
       context.beginPath();
       if (shape.type === "line" || shape.type === "arrow") {
-        context.moveTo(x1, y1); context.lineTo(x2, y2);
+        context.moveTo(localX1, localY1); context.lineTo(localX2, localY2);
       } else if (shape.type === "rect") {
-        context.rect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        context.rect(Math.min(localX1, localX2), Math.min(localY1, localY2), Math.abs(localX2 - localX1), Math.abs(localY2 - localY1));
       } else {
-        context.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
+        context.ellipse(0, 0, Math.abs(localX2 - localX1) / 2, Math.abs(localY2 - localY1) / 2, 0, 0, Math.PI * 2);
       }
       context.stroke();
       if (shape.type === "arrow") {
-        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const angle = Math.atan2(localY2 - localY1, localX2 - localX1);
         const wingAngle = Math.PI / 7;
         context.fillStyle = shape.color;
         context.beginPath();
-        context.moveTo(x2, y2);
-        context.lineTo(x2 - arrowHeadLength * Math.cos(angle - wingAngle), y2 - arrowHeadLength * Math.sin(angle - wingAngle));
-        context.lineTo(x2 - arrowHeadLength * Math.cos(angle + wingAngle), y2 - arrowHeadLength * Math.sin(angle + wingAngle));
+        context.moveTo(localX2, localY2);
+        context.lineTo(localX2 - arrowHeadLength * Math.cos(angle - wingAngle), localY2 - arrowHeadLength * Math.sin(angle - wingAngle));
+        context.lineTo(localX2 - arrowHeadLength * Math.cos(angle + wingAngle), localY2 - arrowHeadLength * Math.sin(angle + wingAngle));
         context.closePath();
         context.fill();
       }
@@ -801,8 +956,9 @@ export default function Home() {
     }
     const textScale = Math.max(1, canvas.width / 1200);
     for (const textBox of texts) {
-      const fontSize = textBox.fontSize * textScale;
-      const outlineWidth = textBox.outlineWidth * textScale;
+      const objectScale = textBox.scale ?? 1;
+      const fontSize = textBox.fontSize * textScale * objectScale;
+      const outlineWidth = textBox.outlineWidth * textScale * objectScale;
       const lines = (textBox.text || "文字").split(/\r?\n/);
       const lineHeight = fontSize * 1.22;
       const x = textBox.x * canvas.width;
@@ -815,21 +971,18 @@ export default function Home() {
       const maxTextWidth = Math.max(...lines.map((line) => context.measureText(line || " ").width));
       const textHeight = Math.max(lineHeight, lines.length * lineHeight);
       const textMargin = outlineWidth + 4 * textScale;
-      includeBounds(
-        x - maxTextWidth / 2 - textMargin,
-        y - textHeight / 2 - textMargin,
-        x + maxTextWidth / 2 + textMargin,
-        y + textHeight / 2 + textMargin,
-      );
+      includeRotatedBounds(x, y, maxTextWidth / 2, textHeight / 2, textBox.rotation ?? 0, textMargin);
+      context.translate(x, y);
+      context.rotate((textBox.rotation ?? 0) * Math.PI / 180);
       lines.forEach((line, index) => {
-        const lineY = y + (index - (lines.length - 1) / 2) * lineHeight;
+        const lineY = (index - (lines.length - 1) / 2) * lineHeight;
         if (outlineWidth > 0) {
           context.strokeStyle = textBox.outlineColor;
           context.lineWidth = outlineWidth * 2;
-          context.strokeText(line || " ", x, lineY);
+          context.strokeText(line || " ", 0, lineY);
         }
         context.fillStyle = textBox.color;
-        context.fillText(line || " ", x, lineY);
+        context.fillText(line || " ", 0, lineY);
       });
       context.restore();
     }
@@ -1110,29 +1263,50 @@ export default function Home() {
                   className="block size-full object-fill"
                   onLoad={(event) => setImageNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
                 /> : <div className="blank-board map-grid absolute inset-0" />}
-                <svg className="absolute inset-0 size-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="地圖圖形">
+                <svg className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 ${baseSize.width || 1} ${baseSize.height || 1}`} aria-label="地圖圖形">
                   {[...shapes, ...(draftShape ? [draftShape] : [])].map((shape) => {
                     const selected = selectedShapeIds.includes(shape.id);
+                    const x1 = shape.x1 * baseSize.width;
+                    const y1 = shape.y1 * baseSize.height;
+                    const x2 = shape.x2 * baseSize.width;
+                    const y2 = shape.y2 * baseSize.height;
+                    const centerX = (x1 + x2) / 2;
+                    const centerY = (y1 + y2) / 2;
+                    const minX = Math.min(x1, x2);
+                    const minY = Math.min(y1, y2);
+                    const maxX = Math.max(x1, x2);
+                    const maxY = Math.max(y1, y2);
+                    const isDraft = draftShape?.id === shape.id;
+                    const showHandles = selected && selectionCount === 1 && !isDraft;
+                    const resizeX = shape.type === "line" || shape.type === "arrow" ? x2 : maxX;
+                    const resizeY = shape.type === "line" || shape.type === "arrow" ? y2 : maxY;
+                    const rotateX = (minX + maxX) / 2;
+                    const rotateY = minY - 30 / zoom;
                     const common = {
                       stroke: shape.color,
                       strokeWidth: selected ? shape.strokeWidth + 1.5 : shape.strokeWidth,
                       fill: "transparent",
                       vectorEffect: "non-scaling-stroke" as const,
                       className: selected ? "shape selected" : "shape",
-                      style: { pointerEvents: draftShape?.id === shape.id ? "none" : "stroke" } as React.CSSProperties,
+                      style: { pointerEvents: isDraft ? "none" : "stroke" } as React.CSSProperties,
                       onPointerDown: (event: React.PointerEvent<SVGElement>) => onShapePointerDown(event, shape),
                     };
-                    if (shape.type === "line") return <line key={shape.id} x1={shape.x1 * 100} y1={shape.y1 * 100} x2={shape.x2 * 100} y2={shape.y2 * 100} {...common} />;
-                    if (shape.type === "arrow") return <g key={shape.id}>
-                      <defs>
+                    return <g key={shape.id} transform={`rotate(${shape.rotation ?? 0} ${centerX} ${centerY})`}>
+                      {shape.type === "arrow" && <defs>
                         <marker id={`arrow-${shape.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse" markerUnits="strokeWidth">
                           <path d="M 0 0 L 10 5 L 0 10 z" fill={shape.color} />
                         </marker>
-                      </defs>
-                      <line x1={shape.x1 * 100} y1={shape.y1 * 100} x2={shape.x2 * 100} y2={shape.y2 * 100} markerEnd={`url(#arrow-${shape.id})`} {...common} />
+                      </defs>}
+                      {shape.type === "line" && <line x1={x1} y1={y1} x2={x2} y2={y2} {...common} />}
+                      {shape.type === "arrow" && <line x1={x1} y1={y1} x2={x2} y2={y2} markerEnd={`url(#arrow-${shape.id})`} {...common} />}
+                      {shape.type === "rect" && <rect x={minX} y={minY} width={maxX - minX} height={maxY - minY} {...common} />}
+                      {shape.type === "ellipse" && <ellipse cx={centerX} cy={centerY} rx={(maxX - minX) / 2} ry={(maxY - minY) / 2} {...common} />}
+                      {showHandles && <>
+                        <line className="transform-connector" x1={rotateX} y1={minY} x2={rotateX} y2={rotateY} strokeWidth={1.5 / zoom} />
+                        <circle className="transform-handle rotate-handle" cx={rotateX} cy={rotateY} r={6 / zoom} strokeWidth={2 / zoom} onPointerDown={(event) => onShapeTransformHandleDown(event, shape, "rotate")} />
+                        <circle className="transform-handle resize-handle" cx={resizeX} cy={resizeY} r={7 / zoom} strokeWidth={2 / zoom} onPointerDown={(event) => onShapeTransformHandleDown(event, shape, "resize")} />
+                      </>}
                     </g>;
-                    if (shape.type === "rect") return <rect key={shape.id} x={Math.min(shape.x1, shape.x2) * 100} y={Math.min(shape.y1, shape.y2) * 100} width={Math.abs(shape.x2 - shape.x1) * 100} height={Math.abs(shape.y2 - shape.y1) * 100} {...common} />;
-                    return <ellipse key={shape.id} cx={(shape.x1 + shape.x2) * 50} cy={(shape.y1 + shape.y2) * 50} rx={Math.abs(shape.x2 - shape.x1) * 50} ry={Math.abs(shape.y2 - shape.y1) * 50} {...common} />;
                   })}
                 </svg>
                 {markers.map((marker) => (
@@ -1147,24 +1321,38 @@ export default function Home() {
                     <span className="marker-label" style={{ fontSize: `${marker.fontSize ?? 10}px` }}>{marker.name}</span>
                   </button>
                 ))}
-                {texts.map((textBox) => (
-                  <button
+                {texts.map((textBox) => {
+                  const selected = selectedTextIds.includes(textBox.id);
+                  const textObjectScale = textBox.scale ?? 1;
+                  return <div
                     key={textBox.id}
-                    className={`map-text ${selectedTextIds.includes(textBox.id) ? "selected" : ""}`}
+                    className="map-text-object"
                     style={{
                       left: `${textBox.x * 100}%`,
                       top: `${textBox.y * 100}%`,
-                      color: textBox.color,
-                      fontFamily: textBox.fontFamily,
-                      fontSize: `${textBox.fontSize}px`,
-                      fontWeight: textBox.fontWeight,
-                      WebkitTextStroke: `${textBox.outlineWidth}px ${textBox.outlineColor}`,
-                      paintOrder: "stroke fill",
+                      transform: `translate(-50%, -50%) rotate(${textBox.rotation ?? 0}deg)`,
                     }}
-                    onPointerDown={(event) => onTextPointerDown(event, textBox)}
-                    aria-label={`編輯文字 ${textBox.text || "文字"}`}
-                  >{textBox.text || "文字"}</button>
-                ))}
+                  >
+                    <button
+                      className={`map-text ${selected ? "selected" : ""}`}
+                      style={{
+                        color: textBox.color,
+                        fontFamily: textBox.fontFamily,
+                        fontSize: `${textBox.fontSize * textObjectScale}px`,
+                        fontWeight: textBox.fontWeight,
+                        WebkitTextStroke: `${textBox.outlineWidth * textObjectScale}px ${textBox.outlineColor}`,
+                        paintOrder: "stroke fill",
+                      }}
+                      onPointerDown={(event) => onTextPointerDown(event, textBox)}
+                      aria-label={`編輯文字 ${textBox.text || "文字"}`}
+                    >{textBox.text || "文字"}</button>
+                    {selected && selectionCount === 1 && <>
+                      <span className="text-transform-connector" />
+                      <button className="text-transform-handle text-rotate-handle" aria-label="旋轉文字" onPointerDown={(event) => onTextTransformHandleDown(event, textBox, "rotate")} />
+                      <button className="text-transform-handle text-resize-handle" aria-label="調整文字大小" onPointerDown={(event) => onTextTransformHandleDown(event, textBox, "resize")} />
+                    </>}
+                  </div>;
+                })}
               </div>
             )}
 
@@ -1203,7 +1391,7 @@ export default function Home() {
             <div className="p-4">
               <div className="mb-5 flex items-center gap-3">
                 <span className="grid size-10 place-items-center rounded-xl border border-primary/30 bg-primary/10 text-primary"><Type className="size-5" /></span>
-                <div><p className="text-sm font-semibold">編輯文字方塊</p><p className="font-mono text-[10px] text-muted-foreground">X {Math.round(selectedText.x * 100)} · Y {Math.round(selectedText.y * 100)}</p></div>
+                <div><p className="text-sm font-semibold">編輯文字方塊</p><p className="font-mono text-[10px] text-muted-foreground">拖曳角落縮放 · 上方圓點旋轉</p></div>
               </div>
               <label className="field-label">文字內容</label>
               <Textarea value={selectedText.text} maxLength={200} onChange={(event) => updateSelectedText({ text: event.target.value })} placeholder="輸入文字" />
@@ -1217,6 +1405,10 @@ export default function Home() {
               </div>
               <label className="field-label mt-5">文字大小 <span className="float-right font-mono text-primary">{selectedText.fontSize}px</span></label>
               <input className="range-control" type="range" min="12" max="72" step="1" value={selectedText.fontSize} onChange={(event) => updateSelectedText({ fontSize: Number(event.target.value) })} />
+              <label className="field-label mt-4">方塊縮放 <span className="float-right font-mono text-primary">{Math.round((selectedText.scale ?? 1) * 100)}%</span></label>
+              <input className="range-control" type="range" min="25" max="500" step="5" value={Math.round((selectedText.scale ?? 1) * 100)} onChange={(event) => updateSelectedText({ scale: Number(event.target.value) / 100 })} />
+              <label className="field-label mt-4">旋轉角度 <span className="float-right font-mono text-primary">{Math.round(selectedText.rotation ?? 0)}°</span></label>
+              <input className="range-control" type="range" min="-180" max="180" step="1" value={selectedText.rotation ?? 0} onChange={(event) => updateSelectedText({ rotation: Number(event.target.value) })} />
               <label className="field-label mt-4">字體粗細 <span className="float-right font-mono text-primary">{selectedText.fontWeight}</span></label>
               <input className="range-control" type="range" min="300" max="900" step="100" value={selectedText.fontWeight} onChange={(event) => updateSelectedText({ fontWeight: Number(event.target.value) })} />
               <label className="field-label mt-4">外框粗細 <span className="float-right font-mono text-primary">{selectedText.outlineWidth}px</span></label>
@@ -1231,7 +1423,7 @@ export default function Home() {
             <div className="p-4">
               <div className="mb-5 flex items-center gap-3">
                 <span className="grid size-10 place-items-center rounded-xl border" style={{ color: selectedShape.color, borderColor: `${selectedShape.color}66`, background: `${selectedShape.color}18` }}><ShapeTypeIcon type={selectedShape.type} className="size-5" /></span>
-                <div><p className="text-sm font-semibold">編輯{SHAPE_LABELS[selectedShape.type]}</p><p className="text-[10px] text-muted-foreground">可在地圖上直接拖曳移動</p></div>
+                <div><p className="text-sm font-semibold">編輯{SHAPE_LABELS[selectedShape.type]}</p><p className="text-[10px] text-muted-foreground">拖曳角落改大小 · 上方圓點旋轉</p></div>
               </div>
               <label className="field-label">顏色</label>
               <div className="flex flex-wrap gap-2">
@@ -1239,6 +1431,8 @@ export default function Home() {
               </div>
               <label className="field-label mt-5">線條粗細 <span className="float-right font-mono text-primary">{selectedShape.strokeWidth}px</span></label>
               <input className="range-control" type="range" min="2" max="12" step="1" value={selectedShape.strokeWidth} onChange={(event) => updateSelectedShape({ strokeWidth: Number(event.target.value) })} />
+              <label className="field-label mt-4">旋轉角度 <span className="float-right font-mono text-primary">{Math.round(selectedShape.rotation ?? 0)}°</span></label>
+              <input className="range-control" type="range" min="-180" max="180" step="1" value={selectedShape.rotation ?? 0} onChange={(event) => updateSelectedShape({ rotation: Number(event.target.value) })} />
               <Button variant="destructive" className="mt-6 w-full" onClick={() => removeShape(selectedShape.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此圖形 <Kbd>Del</Kbd></Button>
             </div>
           ) : selectedMarker ? (

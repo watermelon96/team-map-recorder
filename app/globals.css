@@ -29,6 +29,12 @@
 .shape { cursor: move; transition: filter .15s ease, opacity .15s ease; }
 .shape:hover { filter: drop-shadow(0 0 4px currentColor); }
 .shape.selected { filter: drop-shadow(0 0 5px currentColor); }
+.transform-connector { stroke: white; stroke-dasharray: 4 3; pointer-events: none; }
+.transform-handle { fill: #07110d; stroke: white; pointer-events: all; filter: drop-shadow(0 1px 3px rgba(0,0,0,.8)); }
+.transform-handle:hover { fill: #4ade80; }
+.rotate-handle { cursor: grab; }
+.rotate-handle:active { cursor: grabbing; }
+.resize-handle { cursor: nwse-resize; }
 
 .map-marker { position: absolute; z-index: 10; display: block; width: 28px; height: 28px; transform: translate(-14px, -14px); color: var(--marker-color); cursor: grab; }
 .map-marker:active { cursor: grabbing; }
@@ -40,9 +46,15 @@
 .marker-label { @apply pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-10 max-w-60 -translate-x-1/2 truncate whitespace-nowrap rounded-md border border-white/15 bg-[#07110d]/80 px-1.5 py-0.5 text-[10px] leading-tight font-semibold text-white shadow-lg backdrop-blur; text-shadow: 0 1px 2px #000; }
 .map-marker.selected .marker-dot { box-shadow: 0 0 0 3px white, 0 0 22px var(--marker-color); }
 
-.map-text { position: absolute; z-index: 12; max-width: 70%; transform: translate(-50%, -50%); overflow-wrap: anywhere; white-space: pre-wrap; border: 1px dashed transparent; border-radius: .35rem; background: transparent; padding: .15rem .3rem; line-height: 1.2; text-align: center; text-shadow: 0 2px 5px rgba(0,0,0,.45); cursor: grab; }
+.map-text-object { position: absolute; z-index: 12; width: max-content; max-width: 70%; transform-origin: center; }
+.map-text { position: relative; max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; border: 1px dashed transparent; border-radius: .35rem; background: transparent; padding: .15rem .3rem; line-height: 1.2; text-align: center; text-shadow: 0 2px 5px rgba(0,0,0,.45); cursor: grab; }
 .map-text:active { cursor: grabbing; }
 .map-text.selected { border-color: white; background: rgba(7,17,13,.45); box-shadow: 0 0 0 2px rgba(74,222,128,.45); }
+.text-transform-connector { position: absolute; bottom: calc(100% + 2px); left: 50%; height: 24px; border-left: 1px dashed white; pointer-events: none; }
+.text-transform-handle { position: absolute; z-index: 2; width: 14px; height: 14px; border: 2px solid white; border-radius: 999px; background: #07110d; box-shadow: 0 1px 5px rgba(0,0,0,.8); }
+.text-transform-handle:hover { background: #4ade80; }
+.text-rotate-handle { bottom: calc(100% + 20px); left: 50%; transform: translateX(-50%); cursor: grab; }
+.text-resize-handle { right: -8px; bottom: -8px; cursor: nwse-resize; }
 
 .field-label { @apply mb-2 block text-[11px] font-medium tracking-wide text-muted-foreground; }
 .color-swatch { @apply size-7 rounded-full border-2 border-transparent transition hover:scale-110; box-shadow: 0 0 0 1px rgba(255,255,255,.09); }

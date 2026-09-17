@@ -122,8 +122,8 @@ export default function Home() {
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [draftShape, setDraftShape] = useState<Shape | null>(null);
   const [tool, setTool] = useState<ToolType>("point");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+  const [selectedMarkerIds, setSelectedMarkerIds] = useState<string[]>([]);
+  const [selectedShapeIds, setSelectedShapeIds] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -138,10 +138,23 @@ export default function Home() {
   const mapRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const pointerRef = useRef({ x: 0, y: 0, moved: 0 });
-  const gestureRef = useRef<{ mode: "idle" | "pan" | "draw" | "shape" | "marker"; shapeId?: string; markerId?: string; original?: Shape }>({ mode: "idle" });
+  const gestureRef = useRef<{
+    mode: "idle" | "pan" | "draw" | "selection";
+    markerIds?: string[];
+    shapeIds?: string[];
+    originalMarkers?: Marker[];
+    originalShapes?: Shape[];
+    startClientX?: number;
+    startClientY?: number;
+  }>({ mode: "idle" });
 
-  const selectedMarker = markers.find((marker) => marker.id === selectedId) ?? null;
-  const selectedShape = shapes.find((shape) => shape.id === selectedShapeId) ?? null;
+  const selectionCount = selectedMarkerIds.length + selectedShapeIds.length;
+  const selectedMarker = selectionCount === 1
+    ? markers.find((marker) => marker.id === selectedMarkerIds[0]) ?? null
+    : null;
+  const selectedShape = selectionCount === 1
+    ? shapes.find((shape) => shape.id === selectedShapeIds[0]) ?? null
+    : null;
   const isBoard = boardMode !== "";
 
   useEffect(() => {
@@ -205,8 +218,8 @@ export default function Home() {
       setMapName(file.name);
       setMarkers([]);
       setShapes([]);
-      setSelectedId(null);
-      setSelectedShapeId(null);
+      setSelectedMarkerIds([]);
+      setSelectedShapeIds([]);
       setStatus(`已載入 ${file.name}`);
     };
     reader.onerror = () => setStatus("圖片讀取失敗，請再試一次");
@@ -220,8 +233,8 @@ export default function Home() {
     setImageNatural({ width: 1600, height: 1000 });
     setMarkers([]);
     setShapes([]);
-    setSelectedId(null);
-    setSelectedShapeId(null);
+    setSelectedMarkerIds([]);
+    setSelectedShapeIds([]);
     setStatus("已建立 1600 × 1000 空白版面");
   };
 
@@ -233,6 +246,33 @@ export default function Home() {
       y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
       inside: clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom,
     };
+  };
+
+  const selectMarker = (id: string, additive = false) => {
+    if (!additive) {
+      setSelectedMarkerIds([id]);
+      setSelectedShapeIds([]);
+      return;
+    }
+    setSelectedMarkerIds((current) => current.includes(id)
+      ? current.filter((selected) => selected !== id)
+      : [...current, id]);
+  };
+
+  const selectShape = (id: string, additive = false) => {
+    if (!additive) {
+      setSelectedShapeIds([id]);
+      setSelectedMarkerIds([]);
+      return;
+    }
+    setSelectedShapeIds((current) => current.includes(id)
+      ? current.filter((selected) => selected !== id)
+      : [...current, id]);
+  };
+
+  const clearSelection = () => {
+    setSelectedMarkerIds([]);
+    setSelectedShapeIds([]);
   };
 
   const addMarker = (clientX: number, clientY: number) => {
@@ -253,7 +293,8 @@ export default function Home() {
       fontSize: 10,
     };
     setMarkers((current) => [...current, marker]);
-    setSelectedId(marker.id);
+    setSelectedMarkerIds([marker.id]);
+    setSelectedShapeIds([]);
     setStatus(tool === "member" ? "已放置隊員位置" : "已新增一般標點");
   };
 
@@ -283,28 +324,48 @@ export default function Home() {
     if (gestureRef.current.mode === "draw") {
       const point = pointOnMap(event.clientX, event.clientY);
       if (point) setDraftShape((current) => current ? { ...current, x2: point.x, y2: point.y } : null);
-    } else if (gestureRef.current.mode === "shape" && gestureRef.current.original) {
+    } else if (gestureRef.current.mode === "selection") {
       const rect = mapRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const deltaX = dx / rect.width;
-      const deltaY = dy / rect.height;
-      setShapes((current) => current.map((shape) => shape.id === gestureRef.current.shapeId ? {
-        ...shape,
-        x1: shape.x1 + deltaX,
-        y1: shape.y1 + deltaY,
-        x2: shape.x2 + deltaX,
-        y2: shape.y2 + deltaY,
-      } : shape));
-    } else if (gestureRef.current.mode === "marker") {
-      const rect = mapRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const deltaX = dx / rect.width;
-      const deltaY = dy / rect.height;
-      setMarkers((current) => current.map((marker) => marker.id === gestureRef.current.markerId ? {
-        ...marker,
-        x: Math.min(1, Math.max(0, marker.x + deltaX)),
-        y: Math.min(1, Math.max(0, marker.y + deltaY)),
-      } : marker));
+      const gesture = gestureRef.current;
+      const originalMarkers = gesture.originalMarkers ?? [];
+      const originalShapes = gesture.originalShapes ?? [];
+      const allX = [
+        ...originalMarkers.map((marker) => marker.x),
+        ...originalShapes.flatMap((shape) => [shape.x1, shape.x2]),
+      ];
+      const allY = [
+        ...originalMarkers.map((marker) => marker.y),
+        ...originalShapes.flatMap((shape) => [shape.y1, shape.y2]),
+      ];
+      const rawDeltaX = (event.clientX - (gesture.startClientX ?? event.clientX)) / rect.width;
+      const rawDeltaY = (event.clientY - (gesture.startClientY ?? event.clientY)) / rect.height;
+      const deltaX = allX.length
+        ? Math.min(1 - Math.max(...allX), Math.max(-Math.min(...allX), rawDeltaX))
+        : 0;
+      const deltaY = allY.length
+        ? Math.min(1 - Math.max(...allY), Math.max(-Math.min(...allY), rawDeltaY))
+        : 0;
+      const markerIds = new Set(gesture.markerIds ?? []);
+      const shapeIds = new Set(gesture.shapeIds ?? []);
+      const originalMarkerMap = new Map(originalMarkers.map((marker) => [marker.id, marker]));
+      const originalShapeMap = new Map(originalShapes.map((shape) => [shape.id, shape]));
+      setMarkers((current) => current.map((marker) => {
+        if (!markerIds.has(marker.id)) return marker;
+        const original = originalMarkerMap.get(marker.id);
+        return original ? { ...marker, x: original.x + deltaX, y: original.y + deltaY } : marker;
+      }));
+      setShapes((current) => current.map((shape) => {
+        if (!shapeIds.has(shape.id)) return shape;
+        const original = originalShapeMap.get(shape.id);
+        return original ? {
+          ...shape,
+          x1: original.x1 + deltaX,
+          y1: original.y1 + deltaY,
+          x2: original.x2 + deltaX,
+          y2: original.y2 + deltaY,
+        } : shape;
+      }));
     } else if (gestureRef.current.mode === "pan" && pointerRef.current.moved > 5) {
       setPan((current) => ({ x: current.x + dx, y: current.y + dy }));
     }
@@ -316,15 +377,15 @@ export default function Home() {
     if (gestureRef.current.mode === "draw" && draftShape) {
       if (Math.abs(draftShape.x2 - draftShape.x1) + Math.abs(draftShape.y2 - draftShape.y1) > 0.015) {
         setShapes((current) => [...current, draftShape]);
-        setSelectedShapeId(draftShape.id);
-        setSelectedId(null);
+        setSelectedShapeIds([draftShape.id]);
+        setSelectedMarkerIds([]);
         setStatus("已新增圖形，可拖曳移動或調整顏色");
       }
       setDraftShape(null);
     } else if (gestureRef.current.mode === "pan" && pointerRef.current.moved <= 5) {
       addMarker(event.clientX, event.clientY);
-    } else if (gestureRef.current.mode === "marker" && pointerRef.current.moved > 5) {
-      setStatus("已更新標記位置");
+    } else if (gestureRef.current.mode === "selection" && pointerRef.current.moved > 5) {
+      setStatus(selectionCount > 1 ? `已移動 ${selectionCount} 個物件` : "已更新物件位置");
     }
     gestureRef.current = { mode: "idle" };
   };
@@ -337,44 +398,84 @@ export default function Home() {
 
   const onShapePointerDown = (event: PointerEvent<SVGElement>, shape: Shape) => {
     event.stopPropagation();
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (additive) {
+      selectShape(shape.id, true);
+      setStatus("已更新多選項目；拖曳任一已選物件即可整組移動");
+      return;
+    }
+    const shapeIds = selectedShapeIds.includes(shape.id) ? selectedShapeIds : [shape.id];
+    const markerIds = selectedShapeIds.includes(shape.id) ? selectedMarkerIds : [];
+    if (!selectedShapeIds.includes(shape.id)) selectShape(shape.id);
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
-    gestureRef.current = { mode: "shape", shapeId: shape.id, original: shape };
-    setSelectedShapeId(shape.id);
-    setSelectedId(null);
+    gestureRef.current = {
+      mode: "selection",
+      markerIds,
+      shapeIds,
+      originalMarkers: markers.filter((marker) => markerIds.includes(marker.id)),
+      originalShapes: shapes.filter((item) => shapeIds.includes(item.id)),
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+    };
     setDragging(true);
   };
 
   const onMarkerPointerDown = (event: PointerEvent<HTMLButtonElement>, marker: Marker) => {
     event.stopPropagation();
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (additive) {
+      selectMarker(marker.id, true);
+      setStatus("已更新多選項目；拖曳任一已選物件即可整組移動");
+      return;
+    }
+    const markerIds = selectedMarkerIds.includes(marker.id) ? selectedMarkerIds : [marker.id];
+    const shapeIds = selectedMarkerIds.includes(marker.id) ? selectedShapeIds : [];
+    if (!selectedMarkerIds.includes(marker.id)) selectMarker(marker.id);
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
-    gestureRef.current = { mode: "marker", markerId: marker.id };
-    setSelectedId(marker.id);
-    setSelectedShapeId(null);
+    gestureRef.current = {
+      mode: "selection",
+      markerIds,
+      shapeIds,
+      originalMarkers: markers.filter((item) => markerIds.includes(item.id)),
+      originalShapes: shapes.filter((shape) => shapeIds.includes(shape.id)),
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+    };
     setDragging(true);
   };
 
   const updateSelectedShape = (patch: Partial<Shape>) => {
-    if (!selectedShapeId) return;
-    setShapes((current) => current.map((shape) => shape.id === selectedShapeId ? { ...shape, ...patch } : shape));
+    if (!selectedShape) return;
+    setShapes((current) => current.map((shape) => shape.id === selectedShape.id ? { ...shape, ...patch } : shape));
   };
 
   const removeShape = (id: string) => {
     setShapes((current) => current.filter((shape) => shape.id !== id));
-    if (selectedShapeId === id) setSelectedShapeId(null);
+    setSelectedShapeIds((current) => current.filter((selected) => selected !== id));
     setStatus("已刪除圖形");
   };
 
   const updateSelected = (patch: Partial<Marker>) => {
-    if (!selectedId) return;
-    setMarkers((current) => current.map((marker) => marker.id === selectedId ? { ...marker, ...patch } : marker));
+    if (!selectedMarker) return;
+    setMarkers((current) => current.map((marker) => marker.id === selectedMarker.id ? { ...marker, ...patch } : marker));
   };
 
   const removeMarker = (id: string) => {
     setMarkers((current) => current.filter((marker) => marker.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    setSelectedMarkerIds((current) => current.filter((selected) => selected !== id));
     setStatus("已刪除標記");
+  };
+
+  const removeSelectedObjects = () => {
+    if (!selectionCount) return;
+    const markerIds = new Set(selectedMarkerIds);
+    const shapeIds = new Set(selectedShapeIds);
+    setMarkers((current) => current.filter((marker) => !markerIds.has(marker.id)));
+    setShapes((current) => current.filter((shape) => !shapeIds.has(shape.id)));
+    clearSelection();
+    setStatus(`已刪除 ${selectionCount} 個選取物件`);
   };
 
   const exportBoard = () => {
@@ -399,8 +500,7 @@ export default function Home() {
         setMarkers(board.markers);
         setShapes(Array.isArray(board.shapes) ? board.shapes : []);
         if (importedMode === "blank") setImageNatural({ width: 1600, height: 1000 });
-        setSelectedId(null);
-        setSelectedShapeId(null);
+        clearSelection();
         setStatus("紀錄檔匯入完成");
       } catch {
         setStatus("這不是有效的隊伍紀錄檔");
@@ -555,8 +655,7 @@ export default function Home() {
     setMapName("");
     setMarkers([]);
     setShapes([]);
-    setSelectedId(null);
-    setSelectedShapeId(null);
+    clearSelection();
     setImageNatural({ width: 0, height: 0 });
     setStatus("地圖已清除");
   };
@@ -576,25 +675,22 @@ export default function Home() {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
 
       if (event.key === "Delete" || event.key === "Backspace") {
-        if (selectedId) {
+        if (selectionCount) {
           event.preventDefault();
-          setMarkers((current) => current.filter((marker) => marker.id !== selectedId));
-          setSelectedId(null);
-          setStatus("已使用鍵盤刪除標記");
-        } else if (selectedShapeId) {
-          event.preventDefault();
-          setShapes((current) => current.filter((shape) => shape.id !== selectedShapeId));
-          setSelectedShapeId(null);
-          setStatus("已使用鍵盤刪除圖形");
+          const markerIds = new Set(selectedMarkerIds);
+          const shapeIds = new Set(selectedShapeIds);
+          setMarkers((current) => current.filter((marker) => !markerIds.has(marker.id)));
+          setShapes((current) => current.filter((shape) => !shapeIds.has(shape.id)));
+          clearSelection();
+          setStatus(`已使用鍵盤刪除 ${selectionCount} 個物件`);
         }
         return;
       }
 
       if (event.key === "Escape") {
-        if (selectedId || selectedShapeId || draftShape) {
+        if (selectionCount || draftShape) {
           event.preventDefault();
-          setSelectedId(null);
-          setSelectedShapeId(null);
+          clearSelection();
           setDraftShape(null);
           setStatus("已取消選取");
         }
@@ -624,7 +720,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [draftShape, fitMap, isBoard, selectedId, selectedShapeId]);
+  }, [draftShape, fitMap, isBoard, selectedMarkerIds, selectedShapeIds, selectionCount]);
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
@@ -669,7 +765,7 @@ export default function Home() {
 
           <div className="mt-5 hidden rounded-xl border border-border bg-muted/35 p-3 text-xs leading-5 text-muted-foreground lg:block">
             <Radio className="mb-2 size-4 text-primary" />
-            標記工具點擊放置；圖形工具拖拉繪製；「移動」工具可拖曳版面。滾輪可縮放。
+            標記工具點擊放置；圖形工具拖拉繪製；按住 Shift 或 Ctrl 點選可多選，拖曳任一已選物件可整組移動。滾輪可縮放。
             <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2 border-t border-border pt-3 text-[10px]">
               <span className="flex items-center gap-1.5"><Kbd>Del</Kbd>刪除</span>
               <span className="flex items-center gap-1.5"><Kbd>Esc</Kbd>取消選取</span>
@@ -732,7 +828,7 @@ export default function Home() {
                 /> : <div className="blank-board map-grid absolute inset-0" />}
                 <svg className="absolute inset-0 size-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="地圖圖形">
                   {[...shapes, ...(draftShape ? [draftShape] : [])].map((shape) => {
-                    const selected = shape.id === selectedShapeId;
+                    const selected = selectedShapeIds.includes(shape.id);
                     const common = {
                       stroke: shape.color,
                       strokeWidth: selected ? shape.strokeWidth + 1.5 : shape.strokeWidth,
@@ -758,10 +854,9 @@ export default function Home() {
                 {markers.map((marker) => (
                   <button
                     key={marker.id}
-                    className={`map-marker ${marker.type} ${marker.id === selectedId ? "selected" : ""}`}
+                    className={`map-marker ${marker.type} ${selectedMarkerIds.includes(marker.id) ? "selected" : ""}`}
                     style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%`, "--marker-color": marker.color } as React.CSSProperties}
                     onPointerDown={(event) => onMarkerPointerDown(event, marker)}
-                    onClick={(event) => { event.stopPropagation(); setSelectedId(marker.id); setSelectedShapeId(null); }}
                     aria-label={`編輯${marker.name}`}
                   >
                     <span className="marker-dot">{marker.type === "member" ? <UserRound /> : <CircleDot />}</span>
@@ -787,10 +882,19 @@ export default function Home() {
         <aside className="order-3 border-t border-border bg-card lg:border-l lg:border-t-0">
           <div className="flex items-center justify-between border-b border-border px-4 py-4">
             <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">地圖物件</p>
-            <span className="rounded-full bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">{markers.length + shapes.length} ITEMS</span>
+            <span className="rounded-full bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">{selectionCount ? `${selectionCount} SELECTED` : `${markers.length + shapes.length} ITEMS`}</span>
           </div>
 
-          {selectedShape ? (
+          {selectionCount > 1 ? (
+            <div className="p-4">
+              <div className="rounded-xl border border-primary/30 bg-primary/10 p-4">
+                <Move className="mb-3 size-5 text-primary" />
+                <p className="text-sm font-semibold">已選取 {selectionCount} 個物件</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">拖曳任一已選物件，即可保持相對位置並整組移動。按住 Shift 或 Ctrl 點擊可繼續加入或移除物件。</p>
+              </div>
+              <Button variant="destructive" className="mt-4 w-full" onClick={removeSelectedObjects} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除選取物件 <Kbd>Del</Kbd></Button>
+            </div>
+          ) : selectedShape ? (
             <div className="p-4">
               <div className="mb-5 flex items-center gap-3">
                 <span className="grid size-10 place-items-center rounded-xl border" style={{ color: selectedShape.color, borderColor: `${selectedShape.color}66`, background: `${selectedShape.color}18` }}><ShapeTypeIcon type={selectedShape.type} className="size-5" /></span>
@@ -826,14 +930,14 @@ export default function Home() {
           ) : markers.length || shapes.length ? (
             <div className="max-h-[440px] overflow-y-auto p-2 lg:max-h-[calc(100vh-8.5rem)]">
               {shapes.map((shape) => (
-                <button key={shape.id} onClick={() => { setSelectedShapeId(shape.id); setSelectedId(null); }} className="marker-list-item">
+                <button key={shape.id} onClick={(event) => selectShape(shape.id, event.shiftKey || event.ctrlKey || event.metaKey)} className={`marker-list-item ${selectedShapeIds.includes(shape.id) ? "bg-muted" : ""}`}>
                   <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted" style={{ color: shape.color }}><ShapeTypeIcon type={shape.type} className="size-4" /></span>
                   <span className="min-w-0 flex-1 text-left"><b>{SHAPE_LABELS[shape.type]}</b><small>{shape.strokeWidth}px 線條</small></span>
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </button>
               ))}
               {markers.map((marker) => (
-                <button key={marker.id} onClick={() => { setSelectedId(marker.id); setSelectedShapeId(null); }} className="marker-list-item">
+                <button key={marker.id} onClick={(event) => selectMarker(marker.id, event.shiftKey || event.ctrlKey || event.metaKey)} className={`marker-list-item ${selectedMarkerIds.includes(marker.id) ? "bg-muted" : ""}`}>
                   <span className="size-2.5 shrink-0 rounded-full" style={{ background: marker.color, boxShadow: `0 0 12px ${marker.color}77` }} />
                   <span className="min-w-0 flex-1 text-left"><b>{marker.name || "未命名"}</b><small>{marker.type === "member" ? marker.team || "未分隊" : marker.notes || "一般標點"}</small></span>
                   <ChevronRight className="size-4 text-muted-foreground" />

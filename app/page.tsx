@@ -1156,11 +1156,11 @@ export default function Home() {
   }, [draftShape, fitMap, isBoard, objectCount, recordHistory, redo, selectAllObjects, selectedMarkerIds, selectedShapeIds, selectedTextIds, selectionCount, undo]);
 
   return (
-    <main className="flex min-h-screen flex-col bg-background text-foreground">
+    <main className="flex min-h-[100dvh] flex-col bg-background text-foreground lg:h-[100dvh] lg:max-h-[100dvh] lg:overflow-hidden">
       <input ref={imageInputRef} className="hidden" type="file" accept="image/png,image/jpeg" onChange={(event) => loadImageFile(event.target.files?.[0])} />
       <input ref={importInputRef} className="hidden" type="file" accept="application/json,.json" onChange={importBoard} />
 
-      <header className="z-20 flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/95 px-3 backdrop-blur-xl md:px-5">
+      <header className="z-20 flex h-14 shrink-0 items-center justify-between border-b border-border bg-card/95 px-3 backdrop-blur-xl md:h-16 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-xl border border-primary/30 bg-primary/10 text-primary"><Crosshair className="size-5" /></div>
           <div className="min-w-0">
@@ -1178,13 +1178,13 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="grid flex-1 grid-cols-1 lg:grid-cols-[270px_minmax(0,1fr)_300px]">
-        <aside className="order-2 border-t border-border bg-card p-3 lg:order-1 lg:border-r lg:border-t-0 lg:p-4">
+      <section className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)_290px] xl:grid-cols-[270px_minmax(0,1fr)_300px]">
+        <aside className="order-2 border-t border-border bg-card p-3 lg:order-1 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-t-0 lg:p-4">
           <div className="flex items-center justify-between">
             <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">放置工具</p>
             <span className="text-[10px] text-muted-foreground">點擊地圖放置</span>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-1">
+          <div className="mt-3 grid grid-cols-3 gap-2 lg:grid-cols-1">
             <button onClick={() => setTool("point")} className={`tool-button ${tool === "point" ? "tool-button-active" : ""}`} aria-keyshortcuts="P" title="一般標點（P）"><MapPin /><span className="tool-copy"><b>一般標點</b><small>位置與備註</small></span><Kbd>P</Kbd></button>
             <button onClick={() => setTool("member")} className={`tool-button ${tool === "member" ? "tool-button-active" : ""}`} aria-keyshortcuts="M" title="隊員位置（M）"><Users /><span className="tool-copy"><b>隊員位置</b><small>姓名與隊伍</small></span><Kbd>M</Kbd></button>
             <button onClick={() => setTool("text")} className={`tool-button ${tool === "text" ? "tool-button-active" : ""}`} aria-keyshortcuts="T" title="文字方塊（T）"><Type /><span className="tool-copy"><b>文字方塊</b><small>字型與外框</small></span><Kbd>T</Kbd></button>
@@ -1213,15 +1213,15 @@ export default function Home() {
 
           <div className="mt-5 border-t border-border pt-4">
             <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">地圖管理</p>
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
-              <Button variant="outline" className="justify-start" onClick={() => imageInputRef.current?.click()}><ImagePlus />{boardMode === "image" ? "更換地圖" : "上傳地圖"}</Button>
-              <Button variant="outline" className="justify-start" onClick={createBlankBoard}><Square />空白版面</Button>
-              <Button variant="ghost" className="justify-start text-muted-foreground" onClick={clearBoard} disabled={!isBoard}><Trash2 />清除全部</Button>
+            <div className="grid grid-cols-3 gap-2 lg:grid-cols-1">
+              <Button variant="outline" className="h-10 justify-center px-2 text-[11px] sm:text-sm lg:justify-start lg:px-4" onClick={() => imageInputRef.current?.click()}><ImagePlus />{boardMode === "image" ? "更換地圖" : "上傳地圖"}</Button>
+              <Button variant="outline" className="h-10 justify-center px-2 text-[11px] sm:text-sm lg:justify-start lg:px-4" onClick={createBlankBoard}><Square />空白版面</Button>
+              <Button variant="ghost" className="h-10 justify-center px-2 text-[11px] text-muted-foreground sm:text-sm lg:justify-start lg:px-4" onClick={clearBoard} disabled={!isBoard}><Trash2 />清除全部</Button>
             </div>
           </div>
         </aside>
 
-        <div className="relative order-1 min-h-[58vh] overflow-hidden bg-[#080e0c] lg:order-2 lg:min-h-[calc(100vh-4rem)]">
+        <div className="relative order-1 min-h-[52dvh] overflow-hidden bg-[#080e0c] sm:min-h-[60dvh] lg:order-2 lg:h-full lg:min-h-0">
           <div className="map-grid pointer-events-none absolute inset-0 opacity-25" />
           <div
             ref={viewportRef}
@@ -1236,7 +1236,7 @@ export default function Home() {
             onDrop={onDrop}
           >
             {!isBoard ? (
-              <div className="flex h-full min-h-[520px] items-center justify-center border border-dashed border-primary/25">
+              <div className="flex h-full min-h-[380px] items-center justify-center border border-dashed border-primary/25 sm:min-h-[480px] lg:min-h-0">
                 <div className="max-w-sm px-6 text-center">
                   <div className="mx-auto mb-5 grid size-16 place-items-center rounded-2xl border border-primary/25 bg-primary/10 text-primary shadow-[0_0_44px_rgba(74,222,128,.12)]"><ImagePlus className="size-7" /></div>
                   <h2 className="text-lg font-semibold">開始建立戰術地圖</h2>
@@ -1369,8 +1369,8 @@ export default function Home() {
           </div>
         </div>
 
-        <aside className="order-3 border-t border-border bg-card lg:border-l lg:border-t-0">
-          <div className="flex items-center justify-between border-b border-border px-4 py-4">
+        <aside className="order-3 max-h-[62dvh] overflow-y-auto border-t border-border bg-card lg:h-full lg:max-h-none lg:min-h-0 lg:border-l lg:border-t-0">
+          <div className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-card/95 px-4 py-3 backdrop-blur lg:py-4">
             <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">地圖物件</p>
             <div className="flex items-center gap-1.5">
               <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={selectAllObjects} disabled={!objectCount || selectionCount === objectCount} aria-keyshortcuts="Control+A Meta+A" title="全選所有物件（Ctrl+A）">全選</Button>
@@ -1455,7 +1455,7 @@ export default function Home() {
               <Button variant="destructive" className="mt-5 w-full" onClick={() => removeMarker(selectedMarker.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此標記 <Kbd>Del</Kbd></Button>
             </div>
           ) : markers.length || shapes.length || texts.length ? (
-            <div className="max-h-[440px] overflow-y-auto p-2 lg:max-h-[calc(100vh-8.5rem)]">
+            <div className="max-h-[440px] overflow-y-auto p-2 lg:max-h-none lg:overflow-visible">
               {texts.map((textBox) => (
                 <button key={textBox.id} onClick={(event) => selectText(textBox.id, event.shiftKey || event.ctrlKey || event.metaKey)} className={`marker-list-item ${selectedTextIds.includes(textBox.id) ? "bg-muted" : ""}`}>
                   <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted" style={{ color: textBox.color }}><Type className="size-4" /></span>

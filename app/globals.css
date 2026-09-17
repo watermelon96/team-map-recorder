@@ -40,6 +40,10 @@
 .marker-label { @apply pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-10 max-w-60 -translate-x-1/2 truncate whitespace-nowrap rounded-md border border-white/15 bg-[#07110d]/80 px-1.5 py-0.5 text-[10px] leading-tight font-semibold text-white shadow-lg backdrop-blur; text-shadow: 0 1px 2px #000; }
 .map-marker.selected .marker-dot { box-shadow: 0 0 0 3px white, 0 0 22px var(--marker-color); }
 
+.map-text { position: absolute; z-index: 12; max-width: 70%; transform: translate(-50%, -50%); overflow-wrap: anywhere; white-space: pre-wrap; border: 1px dashed transparent; border-radius: .35rem; background: transparent; padding: .15rem .3rem; line-height: 1.2; text-align: center; text-shadow: 0 2px 5px rgba(0,0,0,.45); cursor: grab; }
+.map-text:active { cursor: grabbing; }
+.map-text.selected { border-color: white; background: rgba(7,17,13,.45); box-shadow: 0 0 0 2px rgba(74,222,128,.45); }
+
 .field-label { @apply mb-2 block text-[11px] font-medium tracking-wide text-muted-foreground; }
 .color-swatch { @apply size-7 rounded-full border-2 border-transparent transition hover:scale-110; box-shadow: 0 0 0 1px rgba(255,255,255,.09); }
 .color-swatch.active { border-color: white; box-shadow: 0 0 0 2px rgba(255,255,255,.12), 0 0 14px currentColor; }

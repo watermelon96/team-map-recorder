@@ -20,6 +20,7 @@ import {
   Square,
   Circle,
   Trash2,
+  Type,
   Upload,
   UserRound,
   Users,
@@ -42,7 +43,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 type MarkerType = "point" | "member";
 type ShapeType = "line" | "arrow" | "rect" | "ellipse";
-type ToolType = MarkerType | ShapeType | "move";
+type ToolType = MarkerType | ShapeType | "text" | "move";
 
 type Marker = {
   id: string;
@@ -67,6 +68,19 @@ type Shape = {
   strokeWidth: number;
 };
 
+type TextBox = {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  color: string;
+  outlineColor: string;
+  outlineWidth: number;
+};
+
 type SavedBoard = {
   version: 1;
   boardMode?: "image" | "blank";
@@ -74,15 +88,25 @@ type SavedBoard = {
   mapImage: string;
   markers: Marker[];
   shapes?: Shape[];
+  texts?: TextBox[];
 };
 
 type SceneSnapshot = {
   markers: Marker[];
   shapes: Shape[];
+  texts: TextBox[];
 };
 
 const STORAGE_KEY = "team-map-recorder-v1";
 const COLORS = ["#4ade80", "#38bdf8", "#fbbf24", "#fb7185", "#c084fc", "#f8fafc"];
+const TEXT_COLORS = ["#ffffff", "#4ade80", "#38bdf8", "#fbbf24", "#fb7185", "#c084fc", "#111827"];
+const FONT_OPTIONS = [
+  { label: "系統黑體", value: '"Microsoft JhengHei", system-ui, sans-serif' },
+  { label: "明體", value: 'PMingLiU, "Noto Serif TC", serif' },
+  { label: "圓體", value: '"Arial Rounded MT Bold", "Microsoft JhengHei", sans-serif' },
+  { label: "等寬字", value: 'Consolas, "Courier New", monospace' },
+  { label: "手寫風格", value: 'cursive' },
+];
 const SHAPE_LABELS: Record<ShapeType, string> = {
   line: "直線",
   arrow: "箭頭",
@@ -92,6 +116,7 @@ const SHAPE_LABELS: Record<ShapeType, string> = {
 const TOOL_SHORTCUTS: Record<string, { tool: ToolType; label: string }> = {
   p: { tool: "point", label: "一般標點" },
   m: { tool: "member", label: "隊員位置" },
+  t: { tool: "text", label: "文字方塊" },
   v: { tool: "move", label: "移動畫布" },
   l: { tool: "line", label: "直線" },
   a: { tool: "arrow", label: "箭頭" },
@@ -127,10 +152,12 @@ export default function Home() {
   const [mapName, setMapName] = useState("");
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [shapes, setShapes] = useState<Shape[]>([]);
+  const [texts, setTexts] = useState<TextBox[]>([]);
   const [draftShape, setDraftShape] = useState<Shape | null>(null);
   const [tool, setTool] = useState<ToolType>("point");
   const [selectedMarkerIds, setSelectedMarkerIds] = useState<string[]>([]);
   const [selectedShapeIds, setSelectedShapeIds] = useState<string[]>([]);
+  const [selectedTextIds, setSelectedTextIds] = useState<string[]>([]);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -154,25 +181,31 @@ export default function Home() {
     shapeIds?: string[];
     originalMarkers?: Marker[];
     originalShapes?: Shape[];
+    textIds?: string[];
+    originalTexts?: TextBox[];
     historySnapshot?: SceneSnapshot;
     startClientX?: number;
     startClientY?: number;
   }>({ mode: "idle" });
 
-  const selectionCount = selectedMarkerIds.length + selectedShapeIds.length;
-  const objectCount = markers.length + shapes.length;
+  const selectionCount = selectedMarkerIds.length + selectedShapeIds.length + selectedTextIds.length;
+  const objectCount = markers.length + shapes.length + texts.length;
   const selectedMarker = selectionCount === 1
     ? markers.find((marker) => marker.id === selectedMarkerIds[0]) ?? null
     : null;
   const selectedShape = selectionCount === 1
     ? shapes.find((shape) => shape.id === selectedShapeIds[0]) ?? null
     : null;
+  const selectedText = selectionCount === 1
+    ? texts.find((textBox) => textBox.id === selectedTextIds[0]) ?? null
+    : null;
   const isBoard = boardMode !== "";
 
   const snapshotScene = useCallback((): SceneSnapshot => ({
     markers: markers.map((marker) => ({ ...marker })),
     shapes: shapes.map((shape) => ({ ...shape })),
-  }), [markers, shapes]);
+    texts: texts.map((textBox) => ({ ...textBox })),
+  }), [markers, shapes, texts]);
 
   const syncHistoryState = useCallback(() => {
     setHistoryState({
@@ -200,8 +233,10 @@ export default function Home() {
     historyFutureRef.current.push(snapshotScene());
     setMarkers(previous.markers.map((marker) => ({ ...marker })));
     setShapes(previous.shapes.map((shape) => ({ ...shape })));
+    setTexts(previous.texts.map((textBox) => ({ ...textBox })));
     setSelectedMarkerIds([]);
     setSelectedShapeIds([]);
+    setSelectedTextIds([]);
     setStatus("已回到上一步");
     syncHistoryState();
   }, [snapshotScene, syncHistoryState]);
@@ -212,8 +247,10 @@ export default function Home() {
     historyPastRef.current.push(snapshotScene());
     setMarkers(next.markers.map((marker) => ({ ...marker })));
     setShapes(next.shapes.map((shape) => ({ ...shape })));
+    setTexts(next.texts.map((textBox) => ({ ...textBox })));
     setSelectedMarkerIds([]);
     setSelectedShapeIds([]);
+    setSelectedTextIds([]);
     setStatus("已前進到下一步");
     syncHistoryState();
   }, [snapshotScene, syncHistoryState]);
@@ -229,6 +266,7 @@ export default function Home() {
           setMapName(board.mapName || "");
           setMarkers(Array.isArray(board.markers) ? board.markers : []);
           setShapes(Array.isArray(board.shapes) ? board.shapes : []);
+          setTexts(Array.isArray(board.texts) ? board.texts : []);
           if (board.boardMode === "blank") setImageNatural({ width: 1600, height: 1000 });
         }
       }
@@ -241,13 +279,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const board: SavedBoard = { version: 1, boardMode: boardMode || undefined, mapName, mapImage, markers, shapes };
+    const board: SavedBoard = { version: 1, boardMode: boardMode || undefined, mapName, mapImage, markers, shapes, texts };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(board));
     } catch {
       setStatus("圖片太大，無法自動保存；請先匯出紀錄檔備份");
     }
-  }, [hydrated, boardMode, mapImage, mapName, markers, shapes]);
+  }, [hydrated, boardMode, mapImage, mapName, markers, shapes, texts]);
 
   const fitMap = useCallback(() => {
     const viewport = viewportRef.current;
@@ -279,8 +317,10 @@ export default function Home() {
       setMapName(file.name);
       setMarkers([]);
       setShapes([]);
+      setTexts([]);
       setSelectedMarkerIds([]);
       setSelectedShapeIds([]);
+      setSelectedTextIds([]);
       resetHistory();
       setStatus(`已載入 ${file.name}`);
     };
@@ -295,8 +335,10 @@ export default function Home() {
     setImageNatural({ width: 1600, height: 1000 });
     setMarkers([]);
     setShapes([]);
+    setTexts([]);
     setSelectedMarkerIds([]);
     setSelectedShapeIds([]);
+    setSelectedTextIds([]);
     resetHistory();
     setStatus("已建立 1600 × 1000 空白版面");
   };
@@ -315,6 +357,7 @@ export default function Home() {
     if (!additive) {
       setSelectedMarkerIds([id]);
       setSelectedShapeIds([]);
+      setSelectedTextIds([]);
       return;
     }
     setSelectedMarkerIds((current) => current.includes(id)
@@ -326,6 +369,7 @@ export default function Home() {
     if (!additive) {
       setSelectedShapeIds([id]);
       setSelectedMarkerIds([]);
+      setSelectedTextIds([]);
       return;
     }
     setSelectedShapeIds((current) => current.includes(id)
@@ -333,23 +377,58 @@ export default function Home() {
       : [...current, id]);
   };
 
+  const selectText = (id: string, additive = false) => {
+    if (!additive) {
+      setSelectedTextIds([id]);
+      setSelectedMarkerIds([]);
+      setSelectedShapeIds([]);
+      return;
+    }
+    setSelectedTextIds((current) => current.includes(id)
+      ? current.filter((selected) => selected !== id)
+      : [...current, id]);
+  };
+
   const clearSelection = () => {
     setSelectedMarkerIds([]);
     setSelectedShapeIds([]);
+    setSelectedTextIds([]);
   };
 
   const selectAllObjects = useCallback(() => {
-    if (!markers.length && !shapes.length) return;
+    if (!markers.length && !shapes.length && !texts.length) return;
     setSelectedMarkerIds(markers.map((marker) => marker.id));
     setSelectedShapeIds(shapes.map((shape) => shape.id));
-    setStatus(`已全選 ${markers.length + shapes.length} 個物件`);
-  }, [markers, shapes]);
+    setSelectedTextIds(texts.map((textBox) => textBox.id));
+    setStatus(`已全選 ${markers.length + shapes.length + texts.length} 個物件`);
+  }, [markers, shapes, texts]);
 
   const addMarker = (clientX: number, clientY: number) => {
-    if (tool !== "point" && tool !== "member") return;
+    if (tool !== "point" && tool !== "member" && tool !== "text") return;
     const point = pointOnMap(clientX, clientY);
     if (!point?.inside) return;
     const { x, y } = point;
+    if (tool === "text") {
+      const textBox: TextBox = {
+        id: makeId(),
+        x,
+        y,
+        text: "文字",
+        fontFamily: FONT_OPTIONS[0].value,
+        fontSize: 28,
+        fontWeight: 600,
+        color: "#ffffff",
+        outlineColor: "#07110d",
+        outlineWidth: 2,
+      };
+      recordHistory();
+      setTexts((current) => [...current, textBox]);
+      setSelectedTextIds([textBox.id]);
+      setSelectedMarkerIds([]);
+      setSelectedShapeIds([]);
+      setStatus("已新增文字方塊");
+      return;
+    }
     const typeCount = markers.filter((marker) => marker.type === tool).length + 1;
     const marker: Marker = {
       id: makeId(),
@@ -366,6 +445,7 @@ export default function Home() {
     setMarkers((current) => [...current, marker]);
     setSelectedMarkerIds([marker.id]);
     setSelectedShapeIds([]);
+    setSelectedTextIds([]);
     setStatus(tool === "member" ? "已放置隊員位置" : "已新增一般標點");
   };
 
@@ -401,13 +481,16 @@ export default function Home() {
       const gesture = gestureRef.current;
       const originalMarkers = gesture.originalMarkers ?? [];
       const originalShapes = gesture.originalShapes ?? [];
+      const originalTexts = gesture.originalTexts ?? [];
       const allX = [
         ...originalMarkers.map((marker) => marker.x),
         ...originalShapes.flatMap((shape) => [shape.x1, shape.x2]),
+        ...originalTexts.map((textBox) => textBox.x),
       ];
       const allY = [
         ...originalMarkers.map((marker) => marker.y),
         ...originalShapes.flatMap((shape) => [shape.y1, shape.y2]),
+        ...originalTexts.map((textBox) => textBox.y),
       ];
       const rawDeltaX = (event.clientX - (gesture.startClientX ?? event.clientX)) / rect.width;
       const rawDeltaY = (event.clientY - (gesture.startClientY ?? event.clientY)) / rect.height;
@@ -419,8 +502,10 @@ export default function Home() {
         : 0;
       const markerIds = new Set(gesture.markerIds ?? []);
       const shapeIds = new Set(gesture.shapeIds ?? []);
+      const textIds = new Set(gesture.textIds ?? []);
       const originalMarkerMap = new Map(originalMarkers.map((marker) => [marker.id, marker]));
       const originalShapeMap = new Map(originalShapes.map((shape) => [shape.id, shape]));
+      const originalTextMap = new Map(originalTexts.map((textBox) => [textBox.id, textBox]));
       setMarkers((current) => current.map((marker) => {
         if (!markerIds.has(marker.id)) return marker;
         const original = originalMarkerMap.get(marker.id);
@@ -437,6 +522,11 @@ export default function Home() {
           y2: original.y2 + deltaY,
         } : shape;
       }));
+      setTexts((current) => current.map((textBox) => {
+        if (!textIds.has(textBox.id)) return textBox;
+        const original = originalTextMap.get(textBox.id);
+        return original ? { ...textBox, x: original.x + deltaX, y: original.y + deltaY } : textBox;
+      }));
     } else if (gestureRef.current.mode === "pan" && pointerRef.current.moved > 5) {
       setPan((current) => ({ x: current.x + dx, y: current.y + dy }));
     }
@@ -451,6 +541,7 @@ export default function Home() {
         setShapes((current) => [...current, draftShape]);
         setSelectedShapeIds([draftShape.id]);
         setSelectedMarkerIds([]);
+        setSelectedTextIds([]);
         setStatus("已新增圖形，可拖曳移動或調整顏色");
       }
       setDraftShape(null);
@@ -479,6 +570,7 @@ export default function Home() {
     }
     const shapeIds = selectedShapeIds.includes(shape.id) ? selectedShapeIds : [shape.id];
     const markerIds = selectedShapeIds.includes(shape.id) ? selectedMarkerIds : [];
+    const textIds = selectedShapeIds.includes(shape.id) ? selectedTextIds : [];
     if (!selectedShapeIds.includes(shape.id)) selectShape(shape.id);
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
@@ -486,8 +578,10 @@ export default function Home() {
       mode: "selection",
       markerIds,
       shapeIds,
+      textIds,
       originalMarkers: markers.filter((marker) => markerIds.includes(marker.id)),
       originalShapes: shapes.filter((item) => shapeIds.includes(item.id)),
+      originalTexts: texts.filter((textBox) => textIds.includes(textBox.id)),
       historySnapshot: snapshotScene(),
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -505,6 +599,7 @@ export default function Home() {
     }
     const markerIds = selectedMarkerIds.includes(marker.id) ? selectedMarkerIds : [marker.id];
     const shapeIds = selectedMarkerIds.includes(marker.id) ? selectedShapeIds : [];
+    const textIds = selectedMarkerIds.includes(marker.id) ? selectedTextIds : [];
     if (!selectedMarkerIds.includes(marker.id)) selectMarker(marker.id);
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
@@ -512,8 +607,39 @@ export default function Home() {
       mode: "selection",
       markerIds,
       shapeIds,
+      textIds,
       originalMarkers: markers.filter((item) => markerIds.includes(item.id)),
       originalShapes: shapes.filter((shape) => shapeIds.includes(shape.id)),
+      originalTexts: texts.filter((textBox) => textIds.includes(textBox.id)),
+      historySnapshot: snapshotScene(),
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+    };
+    setDragging(true);
+  };
+
+  const onTextPointerDown = (event: PointerEvent<HTMLButtonElement>, textBox: TextBox) => {
+    event.stopPropagation();
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (additive) {
+      selectText(textBox.id, true);
+      setStatus("已更新多選項目；拖曳任一已選物件即可整組移動");
+      return;
+    }
+    const textIds = selectedTextIds.includes(textBox.id) ? selectedTextIds : [textBox.id];
+    const markerIds = selectedTextIds.includes(textBox.id) ? selectedMarkerIds : [];
+    const shapeIds = selectedTextIds.includes(textBox.id) ? selectedShapeIds : [];
+    if (!selectedTextIds.includes(textBox.id)) selectText(textBox.id);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
+    gestureRef.current = {
+      mode: "selection",
+      markerIds,
+      shapeIds,
+      textIds,
+      originalMarkers: markers.filter((marker) => markerIds.includes(marker.id)),
+      originalShapes: shapes.filter((shape) => shapeIds.includes(shape.id)),
+      originalTexts: texts.filter((item) => textIds.includes(item.id)),
       historySnapshot: snapshotScene(),
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -547,19 +673,34 @@ export default function Home() {
     setStatus("已刪除標記");
   };
 
+  const updateSelectedText = (patch: Partial<TextBox>) => {
+    if (!selectedText) return;
+    recordHistory();
+    setTexts((current) => current.map((textBox) => textBox.id === selectedText.id ? { ...textBox, ...patch } : textBox));
+  };
+
+  const removeText = (id: string) => {
+    recordHistory();
+    setTexts((current) => current.filter((textBox) => textBox.id !== id));
+    setSelectedTextIds((current) => current.filter((selected) => selected !== id));
+    setStatus("已刪除文字方塊");
+  };
+
   const removeSelectedObjects = () => {
     if (!selectionCount) return;
     recordHistory();
     const markerIds = new Set(selectedMarkerIds);
     const shapeIds = new Set(selectedShapeIds);
+    const textIds = new Set(selectedTextIds);
     setMarkers((current) => current.filter((marker) => !markerIds.has(marker.id)));
     setShapes((current) => current.filter((shape) => !shapeIds.has(shape.id)));
+    setTexts((current) => current.filter((textBox) => !textIds.has(textBox.id)));
     clearSelection();
     setStatus(`已刪除 ${selectionCount} 個選取物件`);
   };
 
   const exportBoard = () => {
-    const board: SavedBoard = { version: 1, boardMode: boardMode || undefined, mapName, mapImage, markers, shapes };
+    const board: SavedBoard = { version: 1, boardMode: boardMode || undefined, mapName, mapImage, markers, shapes, texts };
     saveFile(JSON.stringify(board, null, 2), "application/json", `隊伍紀錄-${new Date().toISOString().slice(0, 10)}.json`);
     setStatus("紀錄檔已匯出");
   };
@@ -579,6 +720,7 @@ export default function Home() {
         setMapName(board.mapName || "已匯入的地圖");
         setMarkers(board.markers);
         setShapes(Array.isArray(board.shapes) ? board.shapes : []);
+        setTexts(Array.isArray(board.texts) ? board.texts : []);
         if (importedMode === "blank") setImageNatural({ width: 1600, height: 1000 });
         clearSelection();
         resetHistory();
@@ -655,6 +797,40 @@ export default function Home() {
         context.closePath();
         context.fill();
       }
+      context.restore();
+    }
+    const textScale = Math.max(1, canvas.width / 1200);
+    for (const textBox of texts) {
+      const fontSize = textBox.fontSize * textScale;
+      const outlineWidth = textBox.outlineWidth * textScale;
+      const lines = (textBox.text || "文字").split(/\r?\n/);
+      const lineHeight = fontSize * 1.22;
+      const x = textBox.x * canvas.width;
+      const y = textBox.y * canvas.height;
+      context.save();
+      context.font = `${textBox.fontWeight} ${fontSize}px ${textBox.fontFamily}`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.lineJoin = "round";
+      const maxTextWidth = Math.max(...lines.map((line) => context.measureText(line || " ").width));
+      const textHeight = Math.max(lineHeight, lines.length * lineHeight);
+      const textMargin = outlineWidth + 4 * textScale;
+      includeBounds(
+        x - maxTextWidth / 2 - textMargin,
+        y - textHeight / 2 - textMargin,
+        x + maxTextWidth / 2 + textMargin,
+        y + textHeight / 2 + textMargin,
+      );
+      lines.forEach((line, index) => {
+        const lineY = y + (index - (lines.length - 1) / 2) * lineHeight;
+        if (outlineWidth > 0) {
+          context.strokeStyle = textBox.outlineColor;
+          context.lineWidth = outlineWidth * 2;
+          context.strokeText(line || " ", x, lineY);
+        }
+        context.fillStyle = textBox.color;
+        context.fillText(line || " ", x, lineY);
+      });
       context.restore();
     }
     const radius = Math.max(12, Math.min(canvas.width, canvas.height) * 0.018);
@@ -736,6 +912,7 @@ export default function Home() {
     setMapName("");
     setMarkers([]);
     setShapes([]);
+    setTexts([]);
     clearSelection();
     resetHistory();
     setImageNatural({ width: 0, height: 0 });
@@ -780,8 +957,10 @@ export default function Home() {
           recordHistory();
           const markerIds = new Set(selectedMarkerIds);
           const shapeIds = new Set(selectedShapeIds);
+          const textIds = new Set(selectedTextIds);
           setMarkers((current) => current.filter((marker) => !markerIds.has(marker.id)));
           setShapes((current) => current.filter((shape) => !shapeIds.has(shape.id)));
+          setTexts((current) => current.filter((textBox) => !textIds.has(textBox.id)));
           clearSelection();
           setStatus(`已使用鍵盤刪除 ${selectionCount} 個物件`);
         }
@@ -821,7 +1000,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [draftShape, fitMap, isBoard, objectCount, recordHistory, redo, selectAllObjects, selectedMarkerIds, selectedShapeIds, selectionCount, undo]);
+  }, [draftShape, fitMap, isBoard, objectCount, recordHistory, redo, selectAllObjects, selectedMarkerIds, selectedShapeIds, selectedTextIds, selectionCount, undo]);
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
@@ -855,6 +1034,7 @@ export default function Home() {
           <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-1">
             <button onClick={() => setTool("point")} className={`tool-button ${tool === "point" ? "tool-button-active" : ""}`} aria-keyshortcuts="P" title="一般標點（P）"><MapPin /><span className="tool-copy"><b>一般標點</b><small>位置與備註</small></span><Kbd>P</Kbd></button>
             <button onClick={() => setTool("member")} className={`tool-button ${tool === "member" ? "tool-button-active" : ""}`} aria-keyshortcuts="M" title="隊員位置（M）"><Users /><span className="tool-copy"><b>隊員位置</b><small>姓名與隊伍</small></span><Kbd>M</Kbd></button>
+            <button onClick={() => setTool("text")} className={`tool-button ${tool === "text" ? "tool-button-active" : ""}`} aria-keyshortcuts="T" title="文字方塊（T）"><Type /><span className="tool-copy"><b>文字方塊</b><small>字型與外框</small></span><Kbd>T</Kbd></button>
           </div>
 
           <p className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">繪圖工具</p>
@@ -967,11 +1147,29 @@ export default function Home() {
                     <span className="marker-label" style={{ fontSize: `${marker.fontSize ?? 10}px` }}>{marker.name}</span>
                   </button>
                 ))}
+                {texts.map((textBox) => (
+                  <button
+                    key={textBox.id}
+                    className={`map-text ${selectedTextIds.includes(textBox.id) ? "selected" : ""}`}
+                    style={{
+                      left: `${textBox.x * 100}%`,
+                      top: `${textBox.y * 100}%`,
+                      color: textBox.color,
+                      fontFamily: textBox.fontFamily,
+                      fontSize: `${textBox.fontSize}px`,
+                      fontWeight: textBox.fontWeight,
+                      WebkitTextStroke: `${textBox.outlineWidth}px ${textBox.outlineColor}`,
+                      paintOrder: "stroke fill",
+                    }}
+                    onPointerDown={(event) => onTextPointerDown(event, textBox)}
+                    aria-label={`編輯文字 ${textBox.text || "文字"}`}
+                  >{textBox.text || "文字"}</button>
+                ))}
               </div>
             )}
 
             {isBoard && (
-              <div className="absolute bottom-3 left-3 rounded-lg border border-border bg-card/90 px-3 py-2 font-mono text-[10px] text-muted-foreground backdrop-blur">{markers.length + shapes.length} ITEMS&nbsp;&nbsp;·&nbsp;&nbsp;{Math.round(zoom * 100)}%</div>
+              <div className="absolute bottom-3 left-3 rounded-lg border border-border bg-card/90 px-3 py-2 font-mono text-[10px] text-muted-foreground backdrop-blur">{objectCount} ITEMS&nbsp;&nbsp;·&nbsp;&nbsp;{Math.round(zoom * 100)}%</div>
             )}
             {isBoard && (
               <div className="absolute bottom-3 right-3 flex gap-1 rounded-xl border border-border bg-card/90 p-1 shadow-lg backdrop-blur">
@@ -1000,6 +1198,34 @@ export default function Home() {
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">拖曳任一已選物件，即可保持相對位置並整組移動。按住 Shift 或 Ctrl 點擊可繼續加入或移除物件。</p>
               </div>
               <Button variant="destructive" className="mt-4 w-full" onClick={removeSelectedObjects} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除選取物件 <Kbd>Del</Kbd></Button>
+            </div>
+          ) : selectedText ? (
+            <div className="p-4">
+              <div className="mb-5 flex items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-xl border border-primary/30 bg-primary/10 text-primary"><Type className="size-5" /></span>
+                <div><p className="text-sm font-semibold">編輯文字方塊</p><p className="font-mono text-[10px] text-muted-foreground">X {Math.round(selectedText.x * 100)} · Y {Math.round(selectedText.y * 100)}</p></div>
+              </div>
+              <label className="field-label">文字內容</label>
+              <Textarea value={selectedText.text} maxLength={200} onChange={(event) => updateSelectedText({ text: event.target.value })} placeholder="輸入文字" />
+              <label className="field-label mt-4">字型</label>
+              <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" value={selectedText.fontFamily} onChange={(event) => updateSelectedText({ fontFamily: event.target.value })}>
+                {FONT_OPTIONS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}
+              </select>
+              <label className="field-label mt-4">文字顏色</label>
+              <div className="flex flex-wrap gap-2">
+                {TEXT_COLORS.map((color) => <button key={color} className={`color-swatch ${selectedText.color === color ? "active" : ""}`} style={{ background: color }} onClick={() => updateSelectedText({ color })} aria-label={`選擇文字顏色 ${color}`} />)}
+              </div>
+              <label className="field-label mt-5">文字大小 <span className="float-right font-mono text-primary">{selectedText.fontSize}px</span></label>
+              <input className="range-control" type="range" min="12" max="72" step="1" value={selectedText.fontSize} onChange={(event) => updateSelectedText({ fontSize: Number(event.target.value) })} />
+              <label className="field-label mt-4">字體粗細 <span className="float-right font-mono text-primary">{selectedText.fontWeight}</span></label>
+              <input className="range-control" type="range" min="300" max="900" step="100" value={selectedText.fontWeight} onChange={(event) => updateSelectedText({ fontWeight: Number(event.target.value) })} />
+              <label className="field-label mt-4">外框粗細 <span className="float-right font-mono text-primary">{selectedText.outlineWidth}px</span></label>
+              <input className="range-control" type="range" min="0" max="6" step="1" value={selectedText.outlineWidth} onChange={(event) => updateSelectedText({ outlineWidth: Number(event.target.value) })} />
+              <label className="field-label mt-4">外框顏色</label>
+              <div className="flex flex-wrap gap-2">
+                {TEXT_COLORS.map((color) => <button key={color} className={`color-swatch ${selectedText.outlineColor === color ? "active" : ""}`} style={{ background: color }} onClick={() => updateSelectedText({ outlineColor: color })} aria-label={`選擇外框顏色 ${color}`} />)}
+              </div>
+              <Button variant="destructive" className="mt-6 w-full" onClick={() => removeText(selectedText.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此文字 <Kbd>Del</Kbd></Button>
             </div>
           ) : selectedShape ? (
             <div className="p-4">
@@ -1034,8 +1260,15 @@ export default function Home() {
               <Textarea value={selectedMarker.notes} maxLength={240} onChange={(event) => updateSelected({ notes: event.target.value })} placeholder="補給、任務或其他資訊…" />
               <Button variant="destructive" className="mt-5 w-full" onClick={() => removeMarker(selectedMarker.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此標記 <Kbd>Del</Kbd></Button>
             </div>
-          ) : markers.length || shapes.length ? (
+          ) : markers.length || shapes.length || texts.length ? (
             <div className="max-h-[440px] overflow-y-auto p-2 lg:max-h-[calc(100vh-8.5rem)]">
+              {texts.map((textBox) => (
+                <button key={textBox.id} onClick={(event) => selectText(textBox.id, event.shiftKey || event.ctrlKey || event.metaKey)} className={`marker-list-item ${selectedTextIds.includes(textBox.id) ? "bg-muted" : ""}`}>
+                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted" style={{ color: textBox.color }}><Type className="size-4" /></span>
+                  <span className="min-w-0 flex-1 text-left"><b>{textBox.text || "未命名文字"}</b><small>{FONT_OPTIONS.find((font) => font.value === textBox.fontFamily)?.label ?? "文字"} · {textBox.fontSize}px</small></span>
+                  <ChevronRight className="size-4 text-muted-foreground" />
+                </button>
+              ))}
               {shapes.map((shape) => (
                 <button key={shape.id} onClick={(event) => selectShape(shape.id, event.shiftKey || event.ctrlKey || event.metaKey)} className={`marker-list-item ${selectedShapeIds.includes(shape.id) ? "bg-muted" : ""}`}>
                   <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted" style={{ color: shape.color }}><ShapeTypeIcon type={shape.type} className="size-4" /></span>

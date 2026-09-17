@@ -149,6 +149,7 @@ export default function Home() {
   }>({ mode: "idle" });
 
   const selectionCount = selectedMarkerIds.length + selectedShapeIds.length;
+  const objectCount = markers.length + shapes.length;
   const selectedMarker = selectionCount === 1
     ? markers.find((marker) => marker.id === selectedMarkerIds[0]) ?? null
     : null;
@@ -274,6 +275,13 @@ export default function Home() {
     setSelectedMarkerIds([]);
     setSelectedShapeIds([]);
   };
+
+  const selectAllObjects = useCallback(() => {
+    if (!markers.length && !shapes.length) return;
+    setSelectedMarkerIds(markers.map((marker) => marker.id));
+    setSelectedShapeIds(shapes.map((shape) => shape.id));
+    setStatus(`已全選 ${markers.length + shapes.length} 個物件`);
+  }, [markers, shapes]);
 
   const addMarker = (clientX: number, clientY: number) => {
     if (tool !== "point" && tool !== "member") return;
@@ -672,6 +680,13 @@ export default function Home() {
         target instanceof HTMLElement &&
         (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
       ) return;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
+        if (isBoard && objectCount) {
+          event.preventDefault();
+          selectAllObjects();
+        }
+        return;
+      }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
 
       if (event.key === "Delete" || event.key === "Backspace") {
@@ -720,7 +735,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [draftShape, fitMap, isBoard, selectedMarkerIds, selectedShapeIds, selectionCount]);
+  }, [draftShape, fitMap, isBoard, objectCount, selectAllObjects, selectedMarkerIds, selectedShapeIds, selectionCount]);
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
@@ -882,7 +897,10 @@ export default function Home() {
         <aside className="order-3 border-t border-border bg-card lg:border-l lg:border-t-0">
           <div className="flex items-center justify-between border-b border-border px-4 py-4">
             <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">地圖物件</p>
-            <span className="rounded-full bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">{selectionCount ? `${selectionCount} SELECTED` : `${markers.length + shapes.length} ITEMS`}</span>
+            <div className="flex items-center gap-1.5">
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={selectAllObjects} disabled={!objectCount || selectionCount === objectCount} aria-keyshortcuts="Control+A Meta+A" title="全選所有物件（Ctrl+A）">全選</Button>
+              <span className="rounded-full bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">{selectionCount ? `${selectionCount} SELECTED` : `${objectCount} ITEMS`}</span>
+            </div>
           </div>
 
           {selectionCount > 1 ? (

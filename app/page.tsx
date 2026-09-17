@@ -34,6 +34,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
 
 type MarkerType = "point" | "member";
@@ -74,6 +75,14 @@ type SavedBoard = {
 
 const STORAGE_KEY = "team-map-recorder-v1";
 const COLORS = ["#4ade80", "#38bdf8", "#fbbf24", "#fb7185", "#c084fc", "#f8fafc"];
+const TOOL_SHORTCUTS: Record<string, { tool: ToolType; label: string }> = {
+  p: { tool: "point", label: "一般標點" },
+  m: { tool: "member", label: "隊員位置" },
+  v: { tool: "move", label: "移動畫布" },
+  l: { tool: "line", label: "直線" },
+  r: { tool: "rect", label: "矩形" },
+  o: { tool: "ellipse", label: "圓形" },
+};
 
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -528,6 +537,66 @@ export default function Home() {
     loadImageFile(event.dataTransfer.files?.[0]);
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (selectedId) {
+          event.preventDefault();
+          setMarkers((current) => current.filter((marker) => marker.id !== selectedId));
+          setSelectedId(null);
+          setStatus("已使用鍵盤刪除標記");
+        } else if (selectedShapeId) {
+          event.preventDefault();
+          setShapes((current) => current.filter((shape) => shape.id !== selectedShapeId));
+          setSelectedShapeId(null);
+          setStatus("已使用鍵盤刪除圖形");
+        }
+        return;
+      }
+
+      if (event.key === "Escape") {
+        if (selectedId || selectedShapeId || draftShape) {
+          event.preventDefault();
+          setSelectedId(null);
+          setSelectedShapeId(null);
+          setDraftShape(null);
+          setStatus("已取消選取");
+        }
+        return;
+      }
+
+      if (!isBoard) return;
+      const shortcut = TOOL_SHORTCUTS[event.key.toLowerCase()];
+      if (shortcut) {
+        event.preventDefault();
+        setTool(shortcut.tool);
+        setStatus(`已切換至${shortcut.label}工具`);
+        return;
+      }
+
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        setZoom((value) => Math.min(4, value + .15));
+      } else if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        setZoom((value) => Math.max(.4, value - .15));
+      } else if (event.key === "0") {
+        event.preventDefault();
+        fitMap();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [draftShape, fitMap, isBoard, selectedId, selectedShapeId]);
+
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
       <input ref={imageInputRef} className="hidden" type="file" accept="image/png,image/jpeg" onChange={(event) => loadImageFile(event.target.files?.[0])} />
@@ -556,21 +625,27 @@ export default function Home() {
             <span className="text-[10px] text-muted-foreground">點擊地圖放置</span>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-1">
-            <button onClick={() => setTool("point")} className={`tool-button ${tool === "point" ? "tool-button-active" : ""}`}><MapPin /><span className="tool-copy"><b>一般標點</b><small>位置與備註</small></span><ChevronRight /></button>
-            <button onClick={() => setTool("member")} className={`tool-button ${tool === "member" ? "tool-button-active" : ""}`}><Users /><span className="tool-copy"><b>隊員位置</b><small>姓名與隊伍</small></span><ChevronRight /></button>
+            <button onClick={() => setTool("point")} className={`tool-button ${tool === "point" ? "tool-button-active" : ""}`} aria-keyshortcuts="P" title="一般標點（P）"><MapPin /><span className="tool-copy"><b>一般標點</b><small>位置與備註</small></span><Kbd>P</Kbd></button>
+            <button onClick={() => setTool("member")} className={`tool-button ${tool === "member" ? "tool-button-active" : ""}`} aria-keyshortcuts="M" title="隊員位置（M）"><Users /><span className="tool-copy"><b>隊員位置</b><small>姓名與隊伍</small></span><Kbd>M</Kbd></button>
           </div>
 
           <p className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">繪圖工具</p>
           <div className="grid grid-cols-4 gap-2 lg:grid-cols-2">
-            <button onClick={() => setTool("move")} className={`drawing-tool ${tool === "move" ? "active" : ""}`} title="移動畫布"><Move /><span>移動</span></button>
-            <button onClick={() => setTool("line")} className={`drawing-tool ${tool === "line" ? "active" : ""}`} title="繪製直線"><Slash /><span>直線</span></button>
-            <button onClick={() => setTool("rect")} className={`drawing-tool ${tool === "rect" ? "active" : ""}`} title="繪製矩形"><Square /><span>矩形</span></button>
-            <button onClick={() => setTool("ellipse")} className={`drawing-tool ${tool === "ellipse" ? "active" : ""}`} title="繪製圓形"><Circle /><span>圓形</span></button>
+            <button onClick={() => setTool("move")} className={`drawing-tool ${tool === "move" ? "active" : ""}`} title="移動畫布（V）" aria-keyshortcuts="V"><Move /><span>移動</span></button>
+            <button onClick={() => setTool("line")} className={`drawing-tool ${tool === "line" ? "active" : ""}`} title="繪製直線（L）" aria-keyshortcuts="L"><Slash /><span>直線</span></button>
+            <button onClick={() => setTool("rect")} className={`drawing-tool ${tool === "rect" ? "active" : ""}`} title="繪製矩形（R）" aria-keyshortcuts="R"><Square /><span>矩形</span></button>
+            <button onClick={() => setTool("ellipse")} className={`drawing-tool ${tool === "ellipse" ? "active" : ""}`} title="繪製圓形（O）" aria-keyshortcuts="O"><Circle /><span>圓形</span></button>
           </div>
 
           <div className="mt-5 hidden rounded-xl border border-border bg-muted/35 p-3 text-xs leading-5 text-muted-foreground lg:block">
             <Radio className="mb-2 size-4 text-primary" />
             標記工具點擊放置；圖形工具拖拉繪製；「移動」工具可拖曳版面。滾輪可縮放。
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2 border-t border-border pt-3 text-[10px]">
+              <span className="flex items-center gap-1.5"><Kbd>Del</Kbd>刪除</span>
+              <span className="flex items-center gap-1.5"><Kbd>Esc</Kbd>取消選取</span>
+              <span className="flex items-center gap-1.5"><Kbd>+</Kbd><Kbd>-</Kbd>縮放</span>
+              <span className="flex items-center gap-1.5"><Kbd>0</Kbd>重設視角</span>
+            </div>
           </div>
 
           <div className="mt-5 border-t border-border pt-4">
@@ -663,9 +738,9 @@ export default function Home() {
             )}
             {isBoard && (
               <div className="absolute bottom-3 right-3 flex gap-1 rounded-xl border border-border bg-card/90 p-1 shadow-lg backdrop-blur">
-                <Button variant="ghost" size="icon-sm" aria-label="縮小" onClick={() => setZoom((value) => Math.max(.4, value - .15))}><Minus /></Button>
-                <Button variant="ghost" size="icon-sm" aria-label="重設視角" onClick={fitMap}><RotateCcw /></Button>
-                <Button variant="ghost" size="icon-sm" aria-label="放大" onClick={() => setZoom((value) => Math.min(4, value + .15))}><Plus /></Button>
+                <Button variant="ghost" size="icon-sm" aria-label="縮小" aria-keyshortcuts="-" title="縮小（-）" onClick={() => setZoom((value) => Math.max(.4, value - .15))}><Minus /></Button>
+                <Button variant="ghost" size="icon-sm" aria-label="重設視角" aria-keyshortcuts="0" title="重設視角（0）" onClick={fitMap}><RotateCcw /></Button>
+                <Button variant="ghost" size="icon-sm" aria-label="放大" aria-keyshortcuts="+" title="放大（+）" onClick={() => setZoom((value) => Math.min(4, value + .15))}><Plus /></Button>
               </div>
             )}
           </div>
@@ -689,7 +764,7 @@ export default function Home() {
               </div>
               <label className="field-label mt-5">線條粗細 <span className="float-right font-mono text-primary">{selectedShape.strokeWidth}px</span></label>
               <input className="range-control" type="range" min="2" max="12" step="1" value={selectedShape.strokeWidth} onChange={(event) => updateSelectedShape({ strokeWidth: Number(event.target.value) })} />
-              <Button variant="destructive" className="mt-6 w-full" onClick={() => removeShape(selectedShape.id)}><Trash2 />刪除此圖形</Button>
+              <Button variant="destructive" className="mt-6 w-full" onClick={() => removeShape(selectedShape.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此圖形 <Kbd>Del</Kbd></Button>
             </div>
           ) : selectedMarker ? (
             <div className="p-4">
@@ -708,7 +783,7 @@ export default function Home() {
               <input className="range-control" type="range" min="8" max="24" step="1" value={selectedMarker.fontSize ?? 10} onChange={(event) => updateSelected({ fontSize: Number(event.target.value) })} />
               <label className="field-label mt-4">備註</label>
               <Textarea value={selectedMarker.notes} maxLength={240} onChange={(event) => updateSelected({ notes: event.target.value })} placeholder="補給、任務或其他資訊…" />
-              <Button variant="destructive" className="mt-5 w-full" onClick={() => removeMarker(selectedMarker.id)}><Trash2 />刪除此標記</Button>
+              <Button variant="destructive" className="mt-5 w-full" onClick={() => removeMarker(selectedMarker.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此標記 <Kbd>Del</Kbd></Button>
             </div>
           ) : markers.length || shapes.length ? (
             <div className="max-h-[440px] overflow-y-auto p-2 lg:max-h-[calc(100vh-8.5rem)]">

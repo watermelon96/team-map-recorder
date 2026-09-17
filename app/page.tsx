@@ -14,6 +14,7 @@ import {
   Minus,
   Plus,
   Radio,
+  Redo2,
   RotateCcw,
   Slash,
   Square,
@@ -22,6 +23,7 @@ import {
   Upload,
   UserRound,
   Users,
+  Undo2,
 } from "lucide-react";
 import {
   useCallback,
@@ -72,6 +74,11 @@ type SavedBoard = {
   mapImage: string;
   markers: Marker[];
   shapes?: Shape[];
+};
+
+type SceneSnapshot = {
+  markers: Marker[];
+  shapes: Shape[];
 };
 
 const STORAGE_KEY = "team-map-recorder-v1";
@@ -131,6 +138,7 @@ export default function Home() {
   const [baseSize, setBaseSize] = useState({ width: 0, height: 0 });
   const [hydrated, setHydrated] = useState(false);
   const [status, setStatus] = useState("所有資料只保存在這台裝置");
+  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -138,12 +146,15 @@ export default function Home() {
   const mapRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const pointerRef = useRef({ x: 0, y: 0, moved: 0 });
+  const historyPastRef = useRef<SceneSnapshot[]>([]);
+  const historyFutureRef = useRef<SceneSnapshot[]>([]);
   const gestureRef = useRef<{
     mode: "idle" | "pan" | "draw" | "selection";
     markerIds?: string[];
     shapeIds?: string[];
     originalMarkers?: Marker[];
     originalShapes?: Shape[];
+    historySnapshot?: SceneSnapshot;
     startClientX?: number;
     startClientY?: number;
   }>({ mode: "idle" });
@@ -157,6 +168,55 @@ export default function Home() {
     ? shapes.find((shape) => shape.id === selectedShapeIds[0]) ?? null
     : null;
   const isBoard = boardMode !== "";
+
+  const snapshotScene = useCallback((): SceneSnapshot => ({
+    markers: markers.map((marker) => ({ ...marker })),
+    shapes: shapes.map((shape) => ({ ...shape })),
+  }), [markers, shapes]);
+
+  const syncHistoryState = useCallback(() => {
+    setHistoryState({
+      canUndo: historyPastRef.current.length > 0,
+      canRedo: historyFutureRef.current.length > 0,
+    });
+  }, []);
+
+  const recordHistory = useCallback((snapshot?: SceneSnapshot) => {
+    historyPastRef.current.push(snapshot ?? snapshotScene());
+    if (historyPastRef.current.length > 80) historyPastRef.current.shift();
+    historyFutureRef.current = [];
+    syncHistoryState();
+  }, [snapshotScene, syncHistoryState]);
+
+  const resetHistory = useCallback(() => {
+    historyPastRef.current = [];
+    historyFutureRef.current = [];
+    syncHistoryState();
+  }, [syncHistoryState]);
+
+  const undo = useCallback(() => {
+    const previous = historyPastRef.current.pop();
+    if (!previous) return;
+    historyFutureRef.current.push(snapshotScene());
+    setMarkers(previous.markers.map((marker) => ({ ...marker })));
+    setShapes(previous.shapes.map((shape) => ({ ...shape })));
+    setSelectedMarkerIds([]);
+    setSelectedShapeIds([]);
+    setStatus("已回到上一步");
+    syncHistoryState();
+  }, [snapshotScene, syncHistoryState]);
+
+  const redo = useCallback(() => {
+    const next = historyFutureRef.current.pop();
+    if (!next) return;
+    historyPastRef.current.push(snapshotScene());
+    setMarkers(next.markers.map((marker) => ({ ...marker })));
+    setShapes(next.shapes.map((shape) => ({ ...shape })));
+    setSelectedMarkerIds([]);
+    setSelectedShapeIds([]);
+    setStatus("已前進到下一步");
+    syncHistoryState();
+  }, [snapshotScene, syncHistoryState]);
 
   useEffect(() => {
     try {
@@ -221,6 +281,7 @@ export default function Home() {
       setShapes([]);
       setSelectedMarkerIds([]);
       setSelectedShapeIds([]);
+      resetHistory();
       setStatus(`已載入 ${file.name}`);
     };
     reader.onerror = () => setStatus("圖片讀取失敗，請再試一次");
@@ -236,6 +297,7 @@ export default function Home() {
     setShapes([]);
     setSelectedMarkerIds([]);
     setSelectedShapeIds([]);
+    resetHistory();
     setStatus("已建立 1600 × 1000 空白版面");
   };
 
@@ -300,6 +362,7 @@ export default function Home() {
       color: tool === "member" ? COLORS[1] : COLORS[0],
       fontSize: 10,
     };
+    recordHistory();
     setMarkers((current) => [...current, marker]);
     setSelectedMarkerIds([marker.id]);
     setSelectedShapeIds([]);
@@ -384,6 +447,7 @@ export default function Home() {
     setDragging(false);
     if (gestureRef.current.mode === "draw" && draftShape) {
       if (Math.abs(draftShape.x2 - draftShape.x1) + Math.abs(draftShape.y2 - draftShape.y1) > 0.015) {
+        recordHistory();
         setShapes((current) => [...current, draftShape]);
         setSelectedShapeIds([draftShape.id]);
         setSelectedMarkerIds([]);
@@ -393,6 +457,7 @@ export default function Home() {
     } else if (gestureRef.current.mode === "pan" && pointerRef.current.moved <= 5) {
       addMarker(event.clientX, event.clientY);
     } else if (gestureRef.current.mode === "selection" && pointerRef.current.moved > 5) {
+      if (gestureRef.current.historySnapshot) recordHistory(gestureRef.current.historySnapshot);
       setStatus(selectionCount > 1 ? `已移動 ${selectionCount} 個物件` : "已更新物件位置");
     }
     gestureRef.current = { mode: "idle" };
@@ -423,6 +488,7 @@ export default function Home() {
       shapeIds,
       originalMarkers: markers.filter((marker) => markerIds.includes(marker.id)),
       originalShapes: shapes.filter((item) => shapeIds.includes(item.id)),
+      historySnapshot: snapshotScene(),
       startClientX: event.clientX,
       startClientY: event.clientY,
     };
@@ -448,6 +514,7 @@ export default function Home() {
       shapeIds,
       originalMarkers: markers.filter((item) => markerIds.includes(item.id)),
       originalShapes: shapes.filter((shape) => shapeIds.includes(shape.id)),
+      historySnapshot: snapshotScene(),
       startClientX: event.clientX,
       startClientY: event.clientY,
     };
@@ -456,10 +523,12 @@ export default function Home() {
 
   const updateSelectedShape = (patch: Partial<Shape>) => {
     if (!selectedShape) return;
+    recordHistory();
     setShapes((current) => current.map((shape) => shape.id === selectedShape.id ? { ...shape, ...patch } : shape));
   };
 
   const removeShape = (id: string) => {
+    recordHistory();
     setShapes((current) => current.filter((shape) => shape.id !== id));
     setSelectedShapeIds((current) => current.filter((selected) => selected !== id));
     setStatus("已刪除圖形");
@@ -467,10 +536,12 @@ export default function Home() {
 
   const updateSelected = (patch: Partial<Marker>) => {
     if (!selectedMarker) return;
+    recordHistory();
     setMarkers((current) => current.map((marker) => marker.id === selectedMarker.id ? { ...marker, ...patch } : marker));
   };
 
   const removeMarker = (id: string) => {
+    recordHistory();
     setMarkers((current) => current.filter((marker) => marker.id !== id));
     setSelectedMarkerIds((current) => current.filter((selected) => selected !== id));
     setStatus("已刪除標記");
@@ -478,6 +549,7 @@ export default function Home() {
 
   const removeSelectedObjects = () => {
     if (!selectionCount) return;
+    recordHistory();
     const markerIds = new Set(selectedMarkerIds);
     const shapeIds = new Set(selectedShapeIds);
     setMarkers((current) => current.filter((marker) => !markerIds.has(marker.id)));
@@ -509,6 +581,7 @@ export default function Home() {
         setShapes(Array.isArray(board.shapes) ? board.shapes : []);
         if (importedMode === "blank") setImageNatural({ width: 1600, height: 1000 });
         clearSelection();
+        resetHistory();
         setStatus("紀錄檔匯入完成");
       } catch {
         setStatus("這不是有效的隊伍紀錄檔");
@@ -664,6 +737,7 @@ export default function Home() {
     setMarkers([]);
     setShapes([]);
     clearSelection();
+    resetHistory();
     setImageNatural({ width: 0, height: 0 });
     setStatus("地圖已清除");
   };
@@ -680,6 +754,17 @@ export default function Home() {
         target instanceof HTMLElement &&
         (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
       ) return;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redo();
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
         if (isBoard && objectCount) {
           event.preventDefault();
@@ -692,6 +777,7 @@ export default function Home() {
       if (event.key === "Delete" || event.key === "Backspace") {
         if (selectionCount) {
           event.preventDefault();
+          recordHistory();
           const markerIds = new Set(selectedMarkerIds);
           const shapeIds = new Set(selectedShapeIds);
           setMarkers((current) => current.filter((marker) => !markerIds.has(marker.id)));
@@ -735,7 +821,7 @@ export default function Home() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [draftShape, fitMap, isBoard, objectCount, selectAllObjects, selectedMarkerIds, selectedShapeIds, selectionCount]);
+  }, [draftShape, fitMap, isBoard, objectCount, recordHistory, redo, selectAllObjects, selectedMarkerIds, selectedShapeIds, selectionCount, undo]);
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
@@ -752,6 +838,8 @@ export default function Home() {
           {mapName && <span className="ml-2 hidden max-w-52 truncate rounded-md border border-border bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground md:block">{mapName}</span>}
         </div>
         <div className="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" onClick={undo} disabled={!historyState.canUndo} title="上一步（Ctrl+Z）" aria-keyshortcuts="Control+Z Meta+Z"><Undo2 /><span className="hidden md:inline">上一步</span></Button>
+          <Button variant="ghost" size="sm" onClick={redo} disabled={!historyState.canRedo} title="下一步（Ctrl+Y）" aria-keyshortcuts="Control+Y Meta+Shift+Z"><Redo2 /><span className="hidden md:inline">下一步</span></Button>
           <Button variant="ghost" size="sm" onClick={() => importInputRef.current?.click()} title="匯入紀錄檔"><Upload /><span className="hidden sm:inline">匯入</span></Button>
           <Button variant="ghost" size="sm" onClick={exportBoard} disabled={!isBoard} title="匯出紀錄檔"><Download /><span className="hidden sm:inline">匯出</span></Button>
           <Button variant="outline" size="sm" onClick={downloadSnapshot} disabled={!isBoard} title="下載標記後的地圖"><Camera /><span className="hidden sm:inline">截圖</span></Button>
@@ -784,6 +872,7 @@ export default function Home() {
             <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2 border-t border-border pt-3 text-[10px]">
               <span className="flex items-center gap-1.5"><Kbd>Del</Kbd>刪除</span>
               <span className="flex items-center gap-1.5"><Kbd>Esc</Kbd>取消選取</span>
+              <span className="flex items-center gap-1.5"><Kbd>Ctrl</Kbd><Kbd>Z</Kbd>上一步</span>
               <span className="flex items-center gap-1.5"><Kbd>+</Kbd><Kbd>-</Kbd>縮放</span>
               <span className="flex items-center gap-1.5"><Kbd>0</Kbd>重設視角</span>
             </div>

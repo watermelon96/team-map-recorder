@@ -1,0 +1,54 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground); --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground); --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground); --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring); --font-sans: var(--font-geist-sans); --font-mono: var(--font-geist-mono); --radius-sm: calc(var(--radius) * .7); --radius-md: var(--radius); --radius-lg: calc(var(--radius) * 1.35); --radius-xl: calc(var(--radius) * 1.7);
+}
+:root, .dark {
+  --background: oklch(.125 .018 160); --foreground: oklch(.94 .018 150); --card: oklch(.165 .022 160); --card-foreground: oklch(.94 .018 150); --popover: oklch(.18 .022 160); --popover-foreground: oklch(.94 .018 150); --primary: oklch(.78 .18 145); --primary-foreground: oklch(.12 .03 155); --secondary: oklch(.22 .025 160); --secondary-foreground: oklch(.9 .02 150); --muted: oklch(.21 .018 160); --muted-foreground: oklch(.66 .025 155); --accent: oklch(.27 .055 150); --accent-foreground: oklch(.94 .02 150); --destructive: oklch(.65 .22 25); --border: oklch(.31 .025 160 / 72%); --input: oklch(.31 .025 160); --ring: oklch(.72 .17 145); --radius: .65rem;
+}
+@layer base { * { @apply border-border outline-ring/50; } html { @apply font-sans; } body { @apply bg-background text-foreground; } button { cursor: pointer; } }
+.map-grid { background-image: linear-gradient(rgba(74,222,128,.11) 1px, transparent 1px), linear-gradient(90deg, rgba(74,222,128,.11) 1px, transparent 1px); background-size: 40px 40px; }
+.tool-button { @apply flex min-h-16 items-center gap-3 rounded-xl border border-transparent bg-muted/35 px-3 text-left text-sm font-medium text-foreground transition hover:border-border hover:bg-muted; }
+.tool-button > svg { @apply size-5 shrink-0 text-muted-foreground; }
+.tool-button > svg:last-child { @apply ml-auto size-3.5 opacity-40; }
+.tool-copy { @apply flex min-w-0 flex-1 flex-col; }
+.tool-copy b { @apply text-sm font-medium text-foreground; }
+.tool-copy small { @apply mt-0.5 text-[10px] font-normal text-muted-foreground; }
+.tool-button-active { @apply border-primary/30 bg-primary/10; }
+.tool-button-active svg { @apply text-primary; }
+
+.drawing-tool { @apply flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-border bg-muted/25 text-[10px] text-muted-foreground transition hover:bg-muted hover:text-foreground; }
+.drawing-tool svg { @apply size-4; }
+.drawing-tool.active { @apply border-primary/40 bg-primary/10 text-primary; box-shadow: inset 0 0 0 1px rgba(74, 222, 128, .05); }
+
+.blank-board { background-color: #0d1713; box-shadow: inset 0 0 70px rgba(0,0,0,.38); }
+
+.shape { cursor: move; transition: filter .15s ease, opacity .15s ease; }
+.shape:hover { filter: drop-shadow(0 0 4px currentColor); }
+.shape.selected { filter: drop-shadow(0 0 5px currentColor); }
+
+.map-marker { position: absolute; z-index: 10; display: block; width: 28px; height: 28px; transform: translate(-14px, -14px); color: var(--marker-color); cursor: grab; }
+.map-marker:active { cursor: grabbing; }
+.map-marker.point { transform: translate(-14px, -34px); }
+.marker-dot { @apply grid size-7 place-items-center rounded-full border-2 bg-[#07110d] shadow-lg transition; border-color: var(--marker-color); box-shadow: 0 0 0 2px rgba(7,17,13,.7), 0 0 18px color-mix(in srgb, var(--marker-color) 45%, transparent); }
+.marker-dot svg { @apply size-3.5; }
+.map-marker.point .marker-dot { border-radius: 50% 50% 50% 12%; transform: rotate(-45deg); }
+.map-marker.point .marker-dot svg { transform: rotate(45deg); }
+.marker-label { @apply pointer-events-none absolute left-1/2 top-1/2 z-10 max-w-60 -translate-x-1/2 -translate-y-1/2 truncate whitespace-nowrap rounded-md border border-white/15 bg-[#07110d]/80 px-1.5 py-0.5 text-[10px] leading-tight font-semibold text-white shadow-lg backdrop-blur; text-shadow: 0 1px 2px #000; }
+.map-marker.selected .marker-dot { box-shadow: 0 0 0 3px white, 0 0 22px var(--marker-color); }
+
+.field-label { @apply mb-2 block text-[11px] font-medium tracking-wide text-muted-foreground; }
+.color-swatch { @apply size-7 rounded-full border-2 border-transparent transition hover:scale-110; box-shadow: 0 0 0 1px rgba(255,255,255,.09); }
+.color-swatch.active { border-color: white; box-shadow: 0 0 0 2px rgba(255,255,255,.12), 0 0 14px currentColor; }
+.marker-list-item { @apply flex w-full items-center gap-3 rounded-xl px-3 py-3 transition hover:bg-muted/65; }
+.marker-list-item b { @apply block truncate text-xs font-medium text-foreground; }
+.marker-list-item small { @apply mt-0.5 block truncate text-[10px] text-muted-foreground; }
+.range-control { width: 100%; accent-color: #4ade80; }
+
+@media (max-width: 1023px) {
+  .tool-button { min-height: 54px; }
+  .tool-copy small, .tool-button > svg:last-child { display: none; }
+}

@@ -101,6 +101,13 @@ type SceneSnapshot = {
 };
 
 const STORAGE_KEY = "team-map-recorder-v1";
+const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_BOARD_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_IMAGE_DATA_URL_LENGTH = 14 * 1024 * 1024;
+const MAX_LOCAL_STORAGE_IMAGE_LENGTH = 4 * 1024 * 1024;
+const MAX_IMAGE_DIMENSION = 8192;
+const MAX_IMAGE_PIXELS = 32_000_000;
+const MAX_OBJECTS = 1000;
 const COLORS = ["#4ade80", "#38bdf8", "#fbbf24", "#fb7185", "#c084fc", "#f8fafc"];
 const TEXT_COLORS = ["#ffffff", "#4ade80", "#38bdf8", "#fbbf24", "#fb7185", "#c084fc", "#111827"];
 const FONT_OPTIONS = [
@@ -142,6 +149,166 @@ function makeId() {
 
 function normalizeRotation(value: number) {
   return ((value + 180) % 360 + 360) % 360 - 180;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cleanText(value: unknown, maximumLength: number, fallback = "") {
+  if (typeof value !== "string") return fallback;
+  return Array.from(value.slice(0, maximumLength * 2))
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127);
+    })
+    .join("")
+    .slice(0, maximumLength);
+}
+
+function boundedNumber(value: unknown, minimum: number, maximum: number, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, value))
+    : fallback;
+}
+
+function isSafeMapImage(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > MAX_IMAGE_DATA_URL_LENGTH) return false;
+  return value.startsWith("data:image/png;base64,") || value.startsWith("data:image/jpeg;base64,");
+}
+
+function sanitizeBoard(value: unknown): SavedBoard | null {
+  if (!isRecord(value) || value.version !== 1) return null;
+
+  const usedIds = new Set<string>();
+  const safeId = (candidate: unknown) => {
+    let id = typeof candidate === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(candidate) ? candidate : makeId();
+    while (usedIds.has(id)) id = makeId();
+    usedIds.add(id);
+    return id;
+  };
+  const safeColor = (candidate: unknown, fallback: string, palette = COLORS) =>
+    typeof candidate === "string" && palette.includes(candidate) ? candidate : fallback;
+
+  const markers: Marker[] = [];
+  const rawMarkers = Array.isArray(value.markers) ? value.markers : [];
+  for (const item of rawMarkers) {
+    if (markers.length >= MAX_OBJECTS) break;
+    if (!isRecord(item)) continue;
+    if ((item.type !== "point" && item.type !== "member") || typeof item.x !== "number" || typeof item.y !== "number" || !Number.isFinite(item.x) || !Number.isFinite(item.y)) continue;
+    const type = item.type as MarkerType;
+    markers.push({
+      id: safeId(item.id),
+      type,
+      x: boundedNumber(item.x, 0, 1, 0.5),
+      y: boundedNumber(item.y, 0, 1, 0.5),
+      name: cleanText(item.name, 40, type === "member" ? "隊員" : "標點"),
+      notes: cleanText(item.notes, 240),
+      team: cleanText(item.team, 24),
+      color: safeColor(item.color, type === "member" ? COLORS[1] : COLORS[0]),
+      fontSize: boundedNumber(item.fontSize, 8, 24, 10),
+    });
+  }
+
+  const shapes: Shape[] = [];
+  const rawShapes = Array.isArray(value.shapes) ? value.shapes : [];
+  for (const item of rawShapes) {
+    if (markers.length + shapes.length >= MAX_OBJECTS) break;
+    if (!isRecord(item)) continue;
+    if (!(["line", "arrow", "rect", "ellipse"] as unknown[]).includes(item.type)) continue;
+    if (![item.x1, item.y1, item.x2, item.y2].every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate))) continue;
+    shapes.push({
+      id: safeId(item.id),
+      type: item.type as ShapeType,
+      x1: boundedNumber(item.x1, -1, 2, 0.25),
+      y1: boundedNumber(item.y1, -1, 2, 0.25),
+      x2: boundedNumber(item.x2, -1, 2, 0.75),
+      y2: boundedNumber(item.y2, -1, 2, 0.75),
+      color: safeColor(item.color, COLORS[0]),
+      strokeWidth: boundedNumber(item.strokeWidth, 2, 12, 4),
+      rotation: boundedNumber(item.rotation, -180, 180, 0),
+    });
+  }
+
+  const texts: TextBox[] = [];
+  const rawTexts = Array.isArray(value.texts) ? value.texts : [];
+  const textPalette = [...new Set([...COLORS, ...TEXT_COLORS])];
+  for (const item of rawTexts) {
+    if (markers.length + shapes.length + texts.length >= MAX_OBJECTS) break;
+    if (!isRecord(item)) continue;
+    if (typeof item.x !== "number" || typeof item.y !== "number" || !Number.isFinite(item.x) || !Number.isFinite(item.y)) continue;
+    const fontFamily = typeof item.fontFamily === "string" && FONT_OPTIONS.some((font) => font.value === item.fontFamily)
+      ? item.fontFamily
+      : FONT_OPTIONS[0].value;
+    texts.push({
+      id: safeId(item.id),
+      x: boundedNumber(item.x, 0, 1, 0.5),
+      y: boundedNumber(item.y, 0, 1, 0.5),
+      text: cleanText(item.text, 200, "文字"),
+      fontFamily,
+      fontSize: boundedNumber(item.fontSize, 12, 72, 28),
+      fontWeight: Math.round(boundedNumber(item.fontWeight, 300, 900, 600) / 100) * 100,
+      color: safeColor(item.color, "#ffffff", textPalette),
+      outlineColor: safeColor(item.outlineColor, "#111827", textPalette),
+      outlineWidth: boundedNumber(item.outlineWidth, 0, 6, 2),
+      rotation: boundedNumber(item.rotation, -180, 180, 0),
+      scale: boundedNumber(item.scale, 0.25, 5, 1),
+    });
+  }
+
+  const mapImage = isSafeMapImage(value.mapImage) ? value.mapImage : "";
+  let boardMode: SavedBoard["boardMode"];
+  if (value.boardMode === "blank") boardMode = "blank";
+  else if (mapImage) boardMode = "image";
+  else if (markers.length || shapes.length || texts.length) boardMode = "blank";
+
+  return {
+    version: 1,
+    boardMode,
+    mapName: cleanText(value.mapName, 120),
+    mapImage: boardMode === "image" ? mapImage : "",
+    markers,
+    shapes,
+    texts,
+  };
+}
+
+function inspectImage(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  const isPng = bytes.length >= 24 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, index) => bytes[index] === byte);
+  if (isPng) return { mime: "image/png", width: view.getUint32(16), height: view.getUint32(20) };
+
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  const startOfFrameMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+  let offset = 2;
+  while (offset + 8 < bytes.length) {
+    if (bytes[offset] !== 0xff) { offset += 1; continue; }
+    const marker = bytes[offset + 1];
+    offset += 2;
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    if (offset + 2 > bytes.length) break;
+    const segmentLength = (bytes[offset] << 8) | bytes[offset + 1];
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) break;
+    if (startOfFrameMarkers.has(marker) && segmentLength >= 7) {
+      return {
+        mime: "image/jpeg",
+        height: (bytes[offset + 3] << 8) | bytes[offset + 4],
+        width: (bytes[offset + 5] << 8) | bytes[offset + 6],
+      };
+    }
+    offset += segmentLength;
+  }
+  return null;
+}
+
+function bufferToDataUrl(buffer: ArrayBuffer, mime: string) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("read_failed"));
+    reader.onerror = () => reject(new Error("read_failed"));
+    reader.readAsDataURL(new Blob([buffer], { type: mime }));
+  });
 }
 
 function saveFile(content: BlobPart, type: string, filename: string) {
@@ -267,20 +434,20 @@ export default function Home() {
     syncHistoryState();
   }, [snapshotScene, syncHistoryState]);
 
+  /* oxlint-disable react/react-compiler -- Browser-only local storage hydration intentionally initializes client state. */
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        const board = JSON.parse(stored) as SavedBoard;
-        if (board.version === 1) {
-          setMapImage(board.mapImage || "");
-          setBoardMode(board.boardMode || (board.mapImage ? "image" : ""));
-          setMapName(board.mapName || "");
-          setMarkers(Array.isArray(board.markers) ? board.markers : []);
-          setShapes(Array.isArray(board.shapes) ? board.shapes : []);
-          setTexts(Array.isArray(board.texts) ? board.texts : []);
-          if (board.boardMode === "blank") setImageNatural({ width: 1600, height: 1000 });
-        }
+        const board = sanitizeBoard(JSON.parse(stored));
+        if (!board) throw new Error("invalid_saved_board");
+        setMapImage(board.mapImage);
+        setBoardMode(board.boardMode || "");
+        setMapName(board.mapName);
+        setMarkers(board.markers);
+        setShapes(board.shapes ?? []);
+        setTexts(board.texts ?? []);
+        if (board.boardMode === "blank") setImageNatural({ width: 1600, height: 1000 });
       }
     } catch {
       setStatus("無法讀取先前的紀錄");
@@ -293,11 +460,17 @@ export default function Home() {
     if (!hydrated) return;
     const board: SavedBoard = { version: 1, boardMode: boardMode || undefined, mapName, mapImage, markers, shapes, texts };
     try {
+      if (mapImage.length > MAX_LOCAL_STORAGE_IMAGE_LENGTH) {
+        localStorage.removeItem(STORAGE_KEY);
+        setStatus("圖片較大，已停用自動保存；請匯出紀錄檔備份");
+        return;
+      }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(board));
     } catch {
       setStatus("圖片太大，無法自動保存；請先匯出紀錄檔備份");
     }
   }, [hydrated, boardMode, mapImage, mapName, markers, shapes, texts]);
+  /* oxlint-enable react/react-compiler */
 
   const fitMap = useCallback(() => {
     const viewport = viewportRef.current;
@@ -316,17 +489,28 @@ export default function Home() {
     return () => window.removeEventListener("resize", fitMap);
   }, [fitMap]);
 
-  const loadImageFile = (file?: File) => {
+  const loadImageFile = async (file?: File) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setStatus("請選擇 JPG 或 PNG 圖片");
+    if (file.size <= 0 || file.size > MAX_IMAGE_FILE_BYTES) {
+      setStatus("圖片不可超過 10 MB");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setMapImage(String(reader.result));
+    try {
+      const buffer = await file.arrayBuffer();
+      const imageInfo = inspectImage(buffer);
+      if (!imageInfo || imageInfo.width <= 0 || imageInfo.height <= 0) {
+        setStatus("只接受有效的 PNG 或 JPG 圖片");
+        return;
+      }
+      if (imageInfo.width > MAX_IMAGE_DIMENSION || imageInfo.height > MAX_IMAGE_DIMENSION || imageInfo.width * imageInfo.height > MAX_IMAGE_PIXELS) {
+        setStatus("圖片尺寸過大；最長邊限 8192px、總像素限 3200 萬");
+        return;
+      }
+      const dataUrl = await bufferToDataUrl(buffer, imageInfo.mime);
+      setMapImage(dataUrl);
       setBoardMode("image");
-      setMapName(file.name);
+      setMapName(cleanText(file.name, 120, "地圖"));
+      setImageNatural({ width: imageInfo.width, height: imageInfo.height });
       setMarkers([]);
       setShapes([]);
       setTexts([]);
@@ -335,9 +519,9 @@ export default function Home() {
       setSelectedTextIds([]);
       resetHistory();
       setStatus(`已載入 ${file.name}`);
-    };
-    reader.onerror = () => setStatus("圖片讀取失敗，請再試一次");
-    reader.readAsDataURL(file);
+    } catch {
+      setStatus("圖片讀取失敗，請再試一次");
+    }
   };
 
   const createBlankBoard = () => {
@@ -417,6 +601,10 @@ export default function Home() {
 
   const addMarker = (clientX: number, clientY: number) => {
     if (tool !== "point" && tool !== "member" && tool !== "text") return;
+    if (objectCount >= MAX_OBJECTS) {
+      setStatus(`已達 ${MAX_OBJECTS} 個物件的安全上限`);
+      return;
+    }
     const point = pointOnMap(clientX, clientY);
     if (!point?.inside) return;
     const { x, y } = point;
@@ -468,6 +656,10 @@ export default function Home() {
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerRef.current = { x: event.clientX, y: event.clientY, moved: 0 };
     if (tool === "line" || tool === "arrow" || tool === "rect" || tool === "ellipse") {
+      if (objectCount >= MAX_OBJECTS) {
+        setStatus(`已達 ${MAX_OBJECTS} 個物件的安全上限`);
+        return;
+      }
       const point = pointOnMap(event.clientX, event.clientY);
       if (!point?.inside) return;
       const draft: Shape = { id: makeId(), type: tool, x1: point.x, y1: point.y, x2: point.x, y2: point.y, color: COLORS[0], strokeWidth: 4, rotation: 0 };
@@ -833,31 +1025,31 @@ export default function Home() {
     setStatus("紀錄檔已匯出");
   };
 
-  const importBoard = (event: ChangeEvent<HTMLInputElement>) => {
+  const importBoard = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const board = JSON.parse(String(reader.result)) as SavedBoard;
-        if (board.version !== 1 || typeof board.mapImage !== "string" || !Array.isArray(board.markers)) throw new Error();
-        setMapImage(board.mapImage);
-        const importedMode = board.boardMode || (board.mapImage ? "image" : "blank");
-        setBoardMode(importedMode);
-        setMapName(board.mapName || "已匯入的地圖");
-        setMarkers(board.markers);
-        setShapes(Array.isArray(board.shapes) ? board.shapes : []);
-        setTexts(Array.isArray(board.texts) ? board.texts : []);
-        if (importedMode === "blank") setImageNatural({ width: 1600, height: 1000 });
-        clearSelection();
-        resetHistory();
-        setStatus("紀錄檔匯入完成");
-      } catch {
-        setStatus("這不是有效的隊伍紀錄檔");
-      }
-    };
-    reader.readAsText(file);
+    if (file.size <= 0 || file.size > MAX_BOARD_FILE_BYTES) {
+      setStatus("紀錄檔不可超過 16 MB");
+      return;
+    }
+    try {
+      const board = sanitizeBoard(JSON.parse(await file.text()));
+      if (!board) throw new Error("invalid_board");
+      setMapImage(board.mapImage);
+      const importedMode = board.boardMode || "blank";
+      setBoardMode(importedMode);
+      setMapName(board.mapName || "已匯入的地圖");
+      setMarkers(board.markers);
+      setShapes(board.shapes ?? []);
+      setTexts(board.texts ?? []);
+      if (importedMode === "blank") setImageNatural({ width: 1600, height: 1000 });
+      clearSelection();
+      resetHistory();
+      setStatus("紀錄檔匯入完成（已通過安全檢查）");
+    } catch {
+      setStatus("這不是有效或安全的隊伍紀錄檔");
+    }
   };
 
   const downloadSnapshot = async () => {
@@ -1074,7 +1266,7 @@ export default function Home() {
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    loadImageFile(event.dataTransfer.files?.[0]);
+    void loadImageFile(event.dataTransfer.files?.[0]);
   };
 
   useEffect(() => {
@@ -1157,8 +1349,8 @@ export default function Home() {
 
   return (
     <main className="flex min-h-[100dvh] flex-col bg-background text-foreground lg:h-[100dvh] lg:max-h-[100dvh] lg:overflow-hidden">
-      <input ref={imageInputRef} className="hidden" type="file" accept="image/png,image/jpeg" onChange={(event) => loadImageFile(event.target.files?.[0])} />
-      <input ref={importInputRef} className="hidden" type="file" accept="application/json,.json" onChange={importBoard} />
+      <input ref={imageInputRef} className="hidden" type="file" accept="image/png,image/jpeg" onChange={(event) => { void loadImageFile(event.target.files?.[0]); }} />
+      <input ref={importInputRef} className="hidden" type="file" accept="application/json,.json" onChange={(event) => { void importBoard(event); }} />
 
       <header className="z-20 flex h-14 shrink-0 items-center justify-between border-b border-border bg-card/95 px-3 backdrop-blur-xl md:h-16 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
@@ -1255,14 +1447,17 @@ export default function Home() {
                   transformOrigin: "center",
                 }}
               >
-                {boardMode === "image" ? <img
+                {boardMode === "image" ? <>
+                  {/* oxlint-disable-next-line next/no-img-element -- User-selected local data URLs cannot use the Next image optimizer. */}
+                  <img
                   ref={imageRef}
                   src={mapImage}
                   alt="已上傳的地圖"
                   draggable={false}
                   className="block size-full object-fill"
                   onLoad={(event) => setImageNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-                /> : <div className="blank-board map-grid absolute inset-0" />}
+                  onError={() => setStatus("地圖圖片無法解碼；請重新上傳 PNG 或 JPG")}
+                /></> : <div className="blank-board map-grid absolute inset-0" />}
                 <svg className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 ${baseSize.width || 1} ${baseSize.height || 1}`} aria-label="地圖圖形">
                   {[...shapes, ...(draftShape ? [draftShape] : [])].map((shape) => {
                     const selected = selectedShapeIds.includes(shape.id);
@@ -1393,27 +1588,27 @@ export default function Home() {
                 <span className="grid size-10 place-items-center rounded-xl border border-primary/30 bg-primary/10 text-primary"><Type className="size-5" /></span>
                 <div><p className="text-sm font-semibold">編輯文字方塊</p><p className="font-mono text-[10px] text-muted-foreground">拖曳角落縮放 · 上方圓點旋轉</p></div>
               </div>
-              <label className="field-label">文字內容</label>
-              <Textarea value={selectedText.text} maxLength={200} onChange={(event) => updateSelectedText({ text: event.target.value })} placeholder="輸入文字" />
-              <label className="field-label mt-4">字型</label>
-              <select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" value={selectedText.fontFamily} onChange={(event) => updateSelectedText({ fontFamily: event.target.value })}>
+              <label className="field-label" htmlFor="text-content">文字內容</label>
+              <Textarea id="text-content" value={selectedText.text} maxLength={200} onChange={(event) => updateSelectedText({ text: event.target.value })} placeholder="輸入文字" />
+              <label className="field-label mt-4" htmlFor="text-font-family">字型</label>
+              <select id="text-font-family" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" value={selectedText.fontFamily} onChange={(event) => updateSelectedText({ fontFamily: event.target.value })}>
                 {FONT_OPTIONS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}
               </select>
-              <label className="field-label mt-4">文字顏色</label>
+              <p className="field-label mt-4">文字顏色</p>
               <div className="flex flex-wrap gap-2">
                 {TEXT_COLORS.map((color) => <button key={color} className={`color-swatch ${selectedText.color === color ? "active" : ""}`} style={{ background: color }} onClick={() => updateSelectedText({ color })} aria-label={`選擇文字顏色 ${color}`} />)}
               </div>
-              <label className="field-label mt-5">文字大小 <span className="float-right font-mono text-primary">{selectedText.fontSize}px</span></label>
-              <input className="range-control" type="range" min="12" max="72" step="1" value={selectedText.fontSize} onChange={(event) => updateSelectedText({ fontSize: Number(event.target.value) })} />
-              <label className="field-label mt-4">方塊縮放 <span className="float-right font-mono text-primary">{Math.round((selectedText.scale ?? 1) * 100)}%</span></label>
-              <input className="range-control" type="range" min="25" max="500" step="5" value={Math.round((selectedText.scale ?? 1) * 100)} onChange={(event) => updateSelectedText({ scale: Number(event.target.value) / 100 })} />
-              <label className="field-label mt-4">旋轉角度 <span className="float-right font-mono text-primary">{Math.round(selectedText.rotation ?? 0)}°</span></label>
-              <input className="range-control" type="range" min="-180" max="180" step="1" value={selectedText.rotation ?? 0} onChange={(event) => updateSelectedText({ rotation: Number(event.target.value) })} />
-              <label className="field-label mt-4">字體粗細 <span className="float-right font-mono text-primary">{selectedText.fontWeight}</span></label>
-              <input className="range-control" type="range" min="300" max="900" step="100" value={selectedText.fontWeight} onChange={(event) => updateSelectedText({ fontWeight: Number(event.target.value) })} />
-              <label className="field-label mt-4">外框粗細 <span className="float-right font-mono text-primary">{selectedText.outlineWidth}px</span></label>
-              <input className="range-control" type="range" min="0" max="6" step="1" value={selectedText.outlineWidth} onChange={(event) => updateSelectedText({ outlineWidth: Number(event.target.value) })} />
-              <label className="field-label mt-4">外框顏色</label>
+              <label className="field-label mt-5" htmlFor="text-font-size">文字大小 <span className="float-right font-mono text-primary">{selectedText.fontSize}px</span></label>
+              <input id="text-font-size" className="range-control" type="range" min="12" max="72" step="1" value={selectedText.fontSize} onChange={(event) => updateSelectedText({ fontSize: Number(event.target.value) })} />
+              <label className="field-label mt-4" htmlFor="text-scale">方塊縮放 <span className="float-right font-mono text-primary">{Math.round((selectedText.scale ?? 1) * 100)}%</span></label>
+              <input id="text-scale" className="range-control" type="range" min="25" max="500" step="5" value={Math.round((selectedText.scale ?? 1) * 100)} onChange={(event) => updateSelectedText({ scale: Number(event.target.value) / 100 })} />
+              <label className="field-label mt-4" htmlFor="text-rotation">旋轉角度 <span className="float-right font-mono text-primary">{Math.round(selectedText.rotation ?? 0)}°</span></label>
+              <input id="text-rotation" className="range-control" type="range" min="-180" max="180" step="1" value={selectedText.rotation ?? 0} onChange={(event) => updateSelectedText({ rotation: Number(event.target.value) })} />
+              <label className="field-label mt-4" htmlFor="text-weight">字體粗細 <span className="float-right font-mono text-primary">{selectedText.fontWeight}</span></label>
+              <input id="text-weight" className="range-control" type="range" min="300" max="900" step="100" value={selectedText.fontWeight} onChange={(event) => updateSelectedText({ fontWeight: Number(event.target.value) })} />
+              <label className="field-label mt-4" htmlFor="text-outline-width">外框粗細 <span className="float-right font-mono text-primary">{selectedText.outlineWidth}px</span></label>
+              <input id="text-outline-width" className="range-control" type="range" min="0" max="6" step="1" value={selectedText.outlineWidth} onChange={(event) => updateSelectedText({ outlineWidth: Number(event.target.value) })} />
+              <p className="field-label mt-4">外框顏色</p>
               <div className="flex flex-wrap gap-2">
                 {TEXT_COLORS.map((color) => <button key={color} className={`color-swatch ${selectedText.outlineColor === color ? "active" : ""}`} style={{ background: color }} onClick={() => updateSelectedText({ outlineColor: color })} aria-label={`選擇外框顏色 ${color}`} />)}
               </div>
@@ -1425,14 +1620,14 @@ export default function Home() {
                 <span className="grid size-10 place-items-center rounded-xl border" style={{ color: selectedShape.color, borderColor: `${selectedShape.color}66`, background: `${selectedShape.color}18` }}><ShapeTypeIcon type={selectedShape.type} className="size-5" /></span>
                 <div><p className="text-sm font-semibold">編輯{SHAPE_LABELS[selectedShape.type]}</p><p className="text-[10px] text-muted-foreground">拖曳角落改大小 · 上方圓點旋轉</p></div>
               </div>
-              <label className="field-label">顏色</label>
+              <p className="field-label">顏色</p>
               <div className="flex flex-wrap gap-2">
                 {COLORS.map((color) => <button key={color} className={`color-swatch ${selectedShape.color === color ? "active" : ""}`} style={{ background: color }} onClick={() => updateSelectedShape({ color })} aria-label={`選擇顏色 ${color}`} />)}
               </div>
-              <label className="field-label mt-5">線條粗細 <span className="float-right font-mono text-primary">{selectedShape.strokeWidth}px</span></label>
-              <input className="range-control" type="range" min="2" max="12" step="1" value={selectedShape.strokeWidth} onChange={(event) => updateSelectedShape({ strokeWidth: Number(event.target.value) })} />
-              <label className="field-label mt-4">旋轉角度 <span className="float-right font-mono text-primary">{Math.round(selectedShape.rotation ?? 0)}°</span></label>
-              <input className="range-control" type="range" min="-180" max="180" step="1" value={selectedShape.rotation ?? 0} onChange={(event) => updateSelectedShape({ rotation: Number(event.target.value) })} />
+              <label className="field-label mt-5" htmlFor="shape-stroke-width">線條粗細 <span className="float-right font-mono text-primary">{selectedShape.strokeWidth}px</span></label>
+              <input id="shape-stroke-width" className="range-control" type="range" min="2" max="12" step="1" value={selectedShape.strokeWidth} onChange={(event) => updateSelectedShape({ strokeWidth: Number(event.target.value) })} />
+              <label className="field-label mt-4" htmlFor="shape-rotation">旋轉角度 <span className="float-right font-mono text-primary">{Math.round(selectedShape.rotation ?? 0)}°</span></label>
+              <input id="shape-rotation" className="range-control" type="range" min="-180" max="180" step="1" value={selectedShape.rotation ?? 0} onChange={(event) => updateSelectedShape({ rotation: Number(event.target.value) })} />
               <Button variant="destructive" className="mt-6 w-full" onClick={() => removeShape(selectedShape.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此圖形 <Kbd>Del</Kbd></Button>
             </div>
           ) : selectedMarker ? (
@@ -1441,17 +1636,17 @@ export default function Home() {
                 <span className="grid size-10 place-items-center rounded-xl border" style={{ color: selectedMarker.color, borderColor: `${selectedMarker.color}66`, background: `${selectedMarker.color}18` }}>{selectedMarker.type === "member" ? <UserRound className="size-5" /> : <MapPin className="size-5" />}</span>
                 <div><p className="text-sm font-semibold">編輯{selectedMarker.type === "member" ? "隊員" : "標點"}</p><p className="font-mono text-[10px] text-muted-foreground">X {Math.round(selectedMarker.x * 100)} · Y {Math.round(selectedMarker.y * 100)}</p></div>
               </div>
-              <label className="field-label">{selectedMarker.type === "member" ? "隊員姓名" : "標點名稱"}</label>
-              <Input value={selectedMarker.name} maxLength={40} onChange={(event) => updateSelected({ name: event.target.value })} placeholder="輸入名稱" />
-              {selectedMarker.type === "member" && <><label className="field-label mt-4">隊伍</label><Input value={selectedMarker.team} maxLength={24} onChange={(event) => updateSelected({ team: event.target.value })} placeholder="例如：A 隊" /></>}
-              <label className="field-label mt-4">顏色</label>
+              <label className="field-label" htmlFor="marker-name">{selectedMarker.type === "member" ? "隊員姓名" : "標點名稱"}</label>
+              <Input id="marker-name" value={selectedMarker.name} maxLength={40} onChange={(event) => updateSelected({ name: event.target.value })} placeholder="輸入名稱" />
+              {selectedMarker.type === "member" && <><label className="field-label mt-4" htmlFor="marker-team">隊伍</label><Input id="marker-team" value={selectedMarker.team} maxLength={24} onChange={(event) => updateSelected({ team: event.target.value })} placeholder="例如：A 隊" /></>}
+              <p className="field-label mt-4">顏色</p>
               <div className="flex flex-wrap gap-2">
                 {COLORS.map((color) => <button key={color} className={`color-swatch ${selectedMarker.color === color ? "active" : ""}`} style={{ background: color }} onClick={() => updateSelected({ color })} aria-label={`選擇顏色 ${color}`} />)}
               </div>
-              <label className="field-label mt-5">文字大小 <span className="float-right font-mono text-primary">{selectedMarker.fontSize ?? 10}px</span></label>
-              <input className="range-control" type="range" min="8" max="24" step="1" value={selectedMarker.fontSize ?? 10} onChange={(event) => updateSelected({ fontSize: Number(event.target.value) })} />
-              <label className="field-label mt-4">備註</label>
-              <Textarea value={selectedMarker.notes} maxLength={240} onChange={(event) => updateSelected({ notes: event.target.value })} placeholder="補給、任務或其他資訊…" />
+              <label className="field-label mt-5" htmlFor="marker-font-size">文字大小 <span className="float-right font-mono text-primary">{selectedMarker.fontSize ?? 10}px</span></label>
+              <input id="marker-font-size" className="range-control" type="range" min="8" max="24" step="1" value={selectedMarker.fontSize ?? 10} onChange={(event) => updateSelected({ fontSize: Number(event.target.value) })} />
+              <label className="field-label mt-4" htmlFor="marker-notes">備註</label>
+              <Textarea id="marker-notes" value={selectedMarker.notes} maxLength={240} onChange={(event) => updateSelected({ notes: event.target.value })} placeholder="補給、任務或其他資訊…" />
               <Button variant="destructive" className="mt-5 w-full" onClick={() => removeMarker(selectedMarker.id)} aria-keyshortcuts="Delete Backspace"><Trash2 />刪除此標記 <Kbd>Del</Kbd></Button>
             </div>
           ) : markers.length || shapes.length || texts.length ? (

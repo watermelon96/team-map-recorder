@@ -1172,8 +1172,8 @@ export default function Home() {
         <div className="flex items-center gap-1.5">
           <Button variant="ghost" size="sm" onClick={undo} disabled={!historyState.canUndo} title="上一步（Ctrl+Z）" aria-keyshortcuts="Control+Z Meta+Z"><Undo2 /><span className="hidden md:inline">上一步</span></Button>
           <Button variant="ghost" size="sm" onClick={redo} disabled={!historyState.canRedo} title="下一步（Ctrl+Y）" aria-keyshortcuts="Control+Y Meta+Shift+Z"><Redo2 /><span className="hidden md:inline">下一步</span></Button>
-          <Button variant="ghost" size="sm" onClick={() => importInputRef.current?.click()} title="匯入紀錄檔"><Upload /><span className="hidden sm:inline">匯入</span></Button>
-          <Button variant="ghost" size="sm" onClick={exportBoard} disabled={!isBoard} title="匯出紀錄檔"><Download /><span className="hidden sm:inline">匯出</span></Button>
+          <Button variant="ghost" size="sm" onClick={() => importInputRef.current?.click()} title="匯入紀錄檔"><Download /><span className="hidden sm:inline">匯入</span></Button>
+          <Button variant="ghost" size="sm" onClick={exportBoard} disabled={!isBoard} title="匯出紀錄檔"><Upload /><span className="hidden sm:inline">匯出</span></Button>
           <Button variant="outline" size="sm" onClick={downloadSnapshot} disabled={!isBoard} title="下載標記後的地圖"><Camera /><span className="hidden sm:inline">截圖</span></Button>
         </div>
       </header>
